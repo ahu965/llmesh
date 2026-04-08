@@ -1,10 +1,12 @@
 """
 数据库连接管理
 - 使用加密 SQLite（sqlcipher3），密钥从 .env 读取
-- 长期可通过修改 DATABASE_URL 切换 PostgreSQL，上层代码无感知
+- SQLCipher 密钥通过 connect_args 的 creator 注入 PRAGMA key，避免 URL 解析问题
+- 长期可通过修改为 PostgreSQL URL 切换，上层代码无感知
 """
 from pathlib import Path
 from sqlmodel import SQLModel, create_engine, Session
+from sqlalchemy import event
 from pydantic_settings import BaseSettings
 
 
@@ -22,8 +24,8 @@ settings = Settings()
 _DB_PATH = Path(settings.db_path)
 _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-# SQLCipher 加密连接串：使用 pysqlcipher3 方言
-_DATABASE_URL = f"sqlite+pysqlcipher://:{settings.db_key}@/{_DB_PATH.resolve()}"
+# 使用普通 sqlite:/// URL，密钥通过连接事件注入 PRAGMA key
+_DATABASE_URL = f"sqlite:///{_DB_PATH.resolve()}"
 
 engine = create_engine(
     _DATABASE_URL,
@@ -32,10 +34,44 @@ engine = create_engine(
 )
 
 
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragma(dbapi_conn, _connection_record):
+    """每次新连接时注入 SQLCipher 加密密钥"""
+    cursor = dbapi_conn.cursor()
+    cursor.execute(f"PRAGMA key='{settings.db_key}'")
+    cursor.close()
+
+
+def _migrate_db():
+    """对已存在的 SQLite 表执行增量列迁移（ALTER TABLE ADD COLUMN IF NOT EXISTS 模拟）"""
+    new_columns = [
+        ("globalsettings", "python_path",    "TEXT"),
+        ("globalsettings", "pypi_url",       "TEXT"),
+        ("globalsettings", "last_built_at",  "REAL"),
+        ("globalsettings", "db_updated_at",  "REAL"),
+        ("modelentry",     "expires_at",     "TEXT"),
+    ]
+    with engine.connect() as conn:
+        for table, col, col_type in new_columns:
+            # 查询现有列
+            result = conn.execute(
+                __import__("sqlalchemy").text(f"PRAGMA table_info({table})")
+            )
+            existing = {row[1] for row in result}
+            if col not in existing:
+                conn.execute(
+                    __import__("sqlalchemy").text(
+                        f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"
+                    )
+                )
+        conn.commit()
+
+
 def init_db():
     """初始化数据库表结构（首次运行时调用）"""
     from backend.models.config import GlobalSettings, ProviderGroup, ModelEntry  # noqa: F401
     SQLModel.metadata.create_all(engine)
+    _migrate_db()
     # 确保 GlobalSettings 有默认行
     with Session(engine) as session:
         from sqlmodel import select

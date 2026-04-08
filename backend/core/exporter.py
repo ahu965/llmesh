@@ -7,7 +7,12 @@ from pathlib import Path
 from typing import Optional
 from sqlmodel import Session, select
 from backend.models.config import GlobalSettings, ProviderGroup, ModelEntry
-import json
+import pprint
+
+
+def _to_python_literal(obj) -> str:
+    """将对象序列化为合法的 Python 字面量（True/False 而非 true/false）"""
+    return pprint.pformat(obj, indent=4, width=120)
 
 
 _TEMPLATE = '''\
@@ -102,7 +107,7 @@ def export_secrets(session: Session, output_path: Optional[str | Path] = None) -
         timeout_retries=gs.timeout_retries,
         timeout_step=gs.timeout_step,
         rate_limit_cooldown=gs.rate_limit_cooldown,
-        model_pool_raw=json.dumps(pool_raw, ensure_ascii=False, indent=4),
+        model_pool_raw=_to_python_literal(pool_raw),
     )
 
     if output_path:

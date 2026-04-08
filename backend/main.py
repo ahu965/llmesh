@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from pathlib import Path
 
 from backend.database import init_db
-from backend.routers import settings, providers, io
+from backend.routers import settings, providers, io, build
 
 
 @asynccontextmanager
@@ -37,6 +37,7 @@ app.add_middleware(
 app.include_router(settings.router)
 app.include_router(providers.router)
 app.include_router(io.router)
+app.include_router(build.router)
 
 # 前端静态文件（构建后）
 _DIST = Path(__file__).parent / "frontend" / "dist"

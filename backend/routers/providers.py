@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from backend.database import get_session
 from backend.models.config import ProviderGroup, ModelEntry
+from backend.core.db_utils import touch_db
 
 router = APIRouter(prefix="/api/providers", tags=["providers"])
 
@@ -24,6 +25,7 @@ class ModelEntryRead(BaseModel):
     supports_thinking: bool
     is_thinking_only: bool
     extra_body: Optional[str]
+    expires_at: Optional[str]
     enabled: bool
 
     class Config:
@@ -38,6 +40,7 @@ class ModelEntryWrite(BaseModel):
     supports_thinking: bool = False
     is_thinking_only: bool = False
     extra_body: Optional[str] = None
+    expires_at: Optional[str] = None
     enabled: bool = True
 
 
@@ -92,6 +95,7 @@ def create_provider(data: ProviderGroupWrite, session: Session = Depends(get_ses
     session.add(group)
     session.commit()
     session.refresh(group)
+    touch_db(session)
     item = ProviderGroupRead.model_validate(group)
     item.models = []
     return item
@@ -107,6 +111,7 @@ def update_provider(group_id: int, data: ProviderGroupWrite, session: Session = 
     session.add(group)
     session.commit()
     session.refresh(group)
+    touch_db(session)
     models = session.exec(select(ModelEntry).where(ModelEntry.group_id == group.id)).all()
     item = ProviderGroupRead.model_validate(group)
     item.models = [ModelEntryRead.model_validate(m) for m in models]
@@ -118,12 +123,12 @@ def delete_provider(group_id: int, session: Session = Depends(get_session)):
     group = session.get(ProviderGroup, group_id)
     if not group:
         raise HTTPException(status_code=404, detail="Provider group not found")
-    # 级联删除模型
     entries = session.exec(select(ModelEntry).where(ModelEntry.group_id == group_id)).all()
     for e in entries:
         session.delete(e)
     session.delete(group)
     session.commit()
+    touch_db(session)
     return {"ok": True}
 
 
@@ -137,6 +142,7 @@ def add_model(group_id: int, data: ModelEntryWrite, session: Session = Depends(g
     session.add(entry)
     session.commit()
     session.refresh(entry)
+    touch_db(session)
     return ModelEntryRead.model_validate(entry)
 
 
@@ -151,6 +157,7 @@ def update_model(group_id: int, model_id: int, data: ModelEntryWrite,
     session.add(entry)
     session.commit()
     session.refresh(entry)
+    touch_db(session)
     return ModelEntryRead.model_validate(entry)
 
 
@@ -161,4 +168,5 @@ def delete_model(group_id: int, model_id: int, session: Session = Depends(get_se
         raise HTTPException(status_code=404, detail="Model entry not found")
     session.delete(entry)
     session.commit()
+    touch_db(session)
     return {"ok": True}

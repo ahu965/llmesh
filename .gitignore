@@ -19,3 +19,7 @@ backend/static/dist/
 # IDE
 .idea/
 .vscode/
+
+# build
+**/secrets.py
+

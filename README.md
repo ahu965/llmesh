@@ -44,7 +44,7 @@ cp .env.example .env
 uv sync
 
 # 启动后端
-uv run uvicorn backend.main:app --reload --port 8000
+uv run uvicorn backend.main:app --reload --reload-dir backend --port 8000
 ```
 
 ### 前端开发模式
@@ -96,7 +96,30 @@ curl -X POST http://localhost:8000/api/export \
 
 ---
 
-## 路由特性说明
+## SDK 打包发布
+
+llmesh 同时作为 SDK 分发给调用方项目使用。UI 提供一键打包发布功能：
+
+1. 打开 UI → 设置 → **SDK 打包发布**
+2. 配置打包 Python 路径（留空使用后端当前解释器）
+3. 配置私有 PyPI 上传地址（留空则仅打包不上传）
+4. 点击「打包」或「打包 + 上传 PyPI」，日志实时流式输出
+
+打包流程：
+- 从数据库自动生成 `llmesh/secrets.py`（含所有厂商配置，编译为 .pyc 随包发布）
+- 执行 `setup.py bdist_wheel`，版本号自动使用时间戳（`YYYY.M.D.HHmmss`）
+- 可选通过 `twine` 上传到私有 PyPI
+- 上传成功后自动清理 `dist/`、`build/`、`*.egg-info/` 等中间产物
+
+调用方安装：
+
+```bash
+pip install llmesh --index-url https://your-pypi.example.com/simple/
+```
+
+---
+
+
 
 ### 三态熔断
 
@@ -139,21 +162,28 @@ get_llm(thinking=None)   # 不过滤，沿用 extra_body 默认配置
 llmesh/
 ├── backend/
 │   ├── main.py              # FastAPI 入口
-│   ├── database.py          # 加密 SQLite 连接
+│   ├── database.py          # 加密 SQLite 连接（含自动迁移）
 │   ├── models/
 │   │   └── config.py        # SQLModel 数据模型
 │   ├── routers/
 │   │   ├── providers.py     # 厂商组 & 模型 CRUD
 │   │   ├── settings.py      # 全局配置
-│   │   └── io.py            # 导入/导出
+│   │   ├── io.py            # 导入/导出
+│   │   └── build.py         # SDK 打包发布（SSE 流式日志）
 │   └── core/
 │       ├── exporter.py      # DB → secrets.py
-│       └── importer.py      # secrets.py → DB
+│       ├── importer.py      # secrets.py → DB
+│       └── db_utils.py      # 公共写操作工具（touch_db）
+├── llmesh/                  # SDK 包（打包分发给调用方）
+│   ├── config.py            # 路由配置入口
+│   ├── pool.py              # 智能路由引擎
+│   └── secrets.py           # 自动生成，不入 git
+├── setup.py                 # SDK 打包脚本（时间戳版本 + .pyc 混淆）
 └── frontend/                # Vue 3 + Arco Design
     └── src/
         ├── views/
         │   ├── Providers.vue    # 模型管理
-        │   └── Settings.vue     # 全局配置
+        │   └── Settings.vue     # 全局配置 & SDK 打包发布
         └── api/index.ts         # API 封装
 ```
 
@@ -165,6 +195,8 @@ llmesh/
 - [x] 全局路由参数配置
 - [x] secrets.py 导入/导出（兼容现有项目）
 - [x] 加密 SQLite 存储
+- [x] SDK 一键打包发布（时间戳版本 + .pyc 混淆 + 私有 PyPI 上传）
+- [x] SSE 流式构建日志
 - [ ] Playground（流式对话测试，多模型对比）
 - [ ] 调用统计面板（成功率、延迟、错误分布）
 - [ ] 健康检查（主动探测模型可用性）

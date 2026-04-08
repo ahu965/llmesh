@@ -1,7 +1,7 @@
 import axios from 'axios'
 
 const http = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE || 'http://localhost:8000',
+  baseURL: import.meta.env.VITE_API_BASE || 'http://localhost:8001',
   timeout: 10000,
 })
 
@@ -16,6 +16,7 @@ export interface ModelEntry {
   supports_thinking: boolean
   is_thinking_only: boolean
   extra_body: string | null
+  expires_at: string | null
   enabled: boolean
 }
 
@@ -64,3 +65,23 @@ export const apiExport = (outputPath?: string) =>
   http.post<string>('/api/export', { output_path: outputPath || null }, { responseType: 'text' })
 export const apiImportFile = (filePath: string) =>
   http.post('/api/import/file', { file_path: filePath })
+
+// ---------- Build ----------
+export interface BuildStatus {
+  last_built_at: number | null
+  db_updated_at: number | null
+  needs_build: boolean
+  python_path: string | null
+  pypi_url: string | null
+}
+
+export interface BuildResult {
+  ok: boolean
+  wheel: string | null
+  wheel_path: string | null
+  uploaded: boolean
+  log: string
+}
+
+export const apiBuildStatus = () => http.get<BuildStatus>('/api/build/status')
+export const apiBuild = (upload = false) => http.post<BuildResult>('/api/build', { upload }, { timeout: 180000 })

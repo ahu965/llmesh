@@ -19,6 +19,11 @@ class GlobalSettings(SQLModel, table=True):
     timeout_retries: int = Field(default=2)
     timeout_step: int = Field(default=10)
     rate_limit_cooldown: int = Field(default=60)
+    # 发布相关
+    python_path: Optional[str] = Field(default=None)        # 打包用 Python 可执行文件路径
+    pypi_url: Optional[str] = Field(default=None)           # 私有 PyPI 上传地址
+    last_built_at: Optional[float] = Field(default=None)    # 上次发包时间戳（unix）
+    db_updated_at: Optional[float] = Field(default=None)    # DB 最后变更时间戳（unix）
 
 
 class ProviderGroup(SQLModel, table=True):
@@ -53,6 +58,7 @@ class ModelEntry(SQLModel, table=True):
     supports_thinking: bool = Field(default=False)
     is_thinking_only: bool = Field(default=False)
     extra_body: Optional[str] = Field(default=None)  # JSON 字符串存储
+    expires_at: Optional[str] = Field(default=None)   # ISO 日期字符串，None=继承组的过期时间
     enabled: bool = Field(default=True)
 
     def get_extra_body(self) -> Optional[Dict[str, Any]]:
