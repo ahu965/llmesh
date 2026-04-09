@@ -6,7 +6,7 @@ secrets.py 导出器
 from pathlib import Path
 from typing import Optional
 from sqlmodel import Session, select
-from backend.models.config import GlobalSettings, ProviderGroup, ModelEntry
+from backend.models.config import GlobalSettings, ProviderGroup, ModelEntry, TaskGroup
 import pprint
 
 
@@ -29,22 +29,30 @@ GLOBAL_SETTINGS = {{
     "timeout_retries": {timeout_retries},
     "timeout_step": {timeout_step},
     "rate_limit_cooldown": {rate_limit_cooldown},
+    {thinking_timeout_line}
 }}
 
 MODEL_POOL_RAW = {model_pool_raw}
+
+TASK_GROUPS = {task_groups}
 '''
 
 
 def _build_model_entry(entry: ModelEntry, group: ProviderGroup) -> dict | str:
     """构造单个模型条目，若只有 model 字段则简化为字符串"""
     extra_body = entry.get_extra_body()
+    effective_priority = entry.priority if entry.priority is not None else group.priority
     has_overrides = any([
         entry.weight is not None and entry.weight != group.weight,
         entry.timeout is not None and entry.timeout != group.timeout,
         entry.remark,
         entry.supports_thinking,
         entry.is_thinking_only,
+        entry.is_vision,
+        entry.tags,
         extra_body,
+        effective_priority != 0,
+        entry.thinking_timeout is not None,
     ])
     if not has_overrides:
         return entry.model
@@ -59,8 +67,20 @@ def _build_model_entry(entry: ModelEntry, group: ProviderGroup) -> dict | str:
         d["supports_thinking"] = True
     if entry.is_thinking_only:
         d["is_thinking_only"] = True
+    if entry.is_vision:
+        d["is_vision"] = True
+    if entry.tags:
+        import json as _json
+        try:
+            d["tags"] = _json.loads(entry.tags)
+        except Exception:
+            pass
+    if effective_priority != 0:
+        d["priority"] = effective_priority
     if extra_body:
         d["extra_body"] = extra_body
+    if entry.thinking_timeout is not None:
+        d["thinking_timeout"] = entry.thinking_timeout
     return d
 
 
@@ -98,6 +118,38 @@ def export_secrets(session: Session, output_path: Optional[str | Path] = None) -
         g["models"] = models_list
         pool_raw.append(g)
 
+    # 任务组
+    task_groups_raw = []
+    tgs = session.exec(
+        select(TaskGroup).where(TaskGroup.enabled == True)  # noqa: E712
+    ).all()
+    for tg in tgs:
+        entry: dict = {"name": tg.name}
+        if tg.display_name:
+            entry["display_name"] = tg.display_name
+        pinned = tg.get_pinned()
+        if pinned:
+            entry["pinned"] = pinned
+        exc_tags = tg.get_exclude_tags()
+        if exc_tags:
+            entry["exclude_tags"] = exc_tags
+        soft_tags = tg.get_tags()
+        if soft_tags:
+            entry["tags"] = soft_tags
+        prefer = tg.get_prefer()
+        if prefer:
+            entry["prefer"] = prefer
+        thinking = tg.get_thinking()
+        if thinking is not None:
+            entry["thinking"] = thinking
+        if tg.remark:
+            entry["remark"] = tg.remark
+        task_groups_raw.append(entry)
+
+    if gs.default_thinking_timeout is not None:
+        thinking_timeout_line = f'"default_thinking_timeout": {gs.default_thinking_timeout},'
+    else:
+        thinking_timeout_line = ""
     content = _TEMPLATE.format(
         default_timeout=gs.default_timeout,
         temperature=gs.temperature,
@@ -107,7 +159,9 @@ def export_secrets(session: Session, output_path: Optional[str | Path] = None) -
         timeout_retries=gs.timeout_retries,
         timeout_step=gs.timeout_step,
         rate_limit_cooldown=gs.rate_limit_cooldown,
+        thinking_timeout_line=thinking_timeout_line,
         model_pool_raw=_to_python_literal(pool_raw),
+        task_groups=_to_python_literal(task_groups_raw),
     )
 
     if output_path:

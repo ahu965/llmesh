@@ -45,11 +45,27 @@ def _set_sqlite_pragma(dbapi_conn, _connection_record):
 def _migrate_db():
     """对已存在的 SQLite 表执行增量列迁移（ALTER TABLE ADD COLUMN IF NOT EXISTS 模拟）"""
     new_columns = [
-        ("globalsettings", "python_path",    "TEXT"),
-        ("globalsettings", "pypi_url",       "TEXT"),
-        ("globalsettings", "last_built_at",  "REAL"),
-        ("globalsettings", "db_updated_at",  "REAL"),
-        ("modelentry",     "expires_at",     "TEXT"),
+        ("globalsettings", "python_path",               "TEXT"),
+        ("globalsettings", "pypi_url",                  "TEXT"),
+        ("globalsettings", "last_built_at",             "REAL"),
+        ("globalsettings", "db_updated_at",             "REAL"),
+        ("globalsettings", "default_thinking_timeout",  "INTEGER"),
+        ("modelentry",     "expires_at",         "TEXT"),
+        ("modelentry",     "priority",           "INTEGER"),
+        ("modelentry",     "is_vision",          "INTEGER"),
+        ("modelentry",     "tags",               "TEXT"),
+        ("modelentry",     "thinking_timeout",   "INTEGER"),
+        ("providergroup",  "priority",       "INTEGER"),
+        ("providergroup",  "alias",          "TEXT"),
+        ("providergroup",  "website",        "TEXT"),
+        ("taskgroup",      "display_name",   "TEXT"),
+        ("taskgroup",      "pinned",         "TEXT"),
+        ("taskgroup",      "exclude_tags",   "TEXT"),
+        ("taskgroup",      "tags",           "TEXT"),
+        ("taskgroup",      "prefer",         "TEXT"),
+        ("taskgroup",      "thinking",       "INTEGER"),
+        ("taskgroup",      "remark",         "TEXT"),
+        ("taskgroup",      "enabled",        "INTEGER"),
     ]
     with engine.connect() as conn:
         for table, col, col_type in new_columns:
@@ -69,7 +85,7 @@ def _migrate_db():
 
 def init_db():
     """初始化数据库表结构（首次运行时调用）"""
-    from backend.models.config import GlobalSettings, ProviderGroup, ModelEntry  # noqa: F401
+    from backend.models.config import GlobalSettings, ProviderGroup, ModelEntry, TaskGroup  # noqa: F401
     SQLModel.metadata.create_all(engine)
     _migrate_db()
     # 确保 GlobalSettings 有默认行

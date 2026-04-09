@@ -24,6 +24,11 @@
               <a-input-number v-model="form.default_timeout" :min="1" style="width:100%" />
             </a-form-item>
           </a-col>
+          <a-col :xs="12" :sm="12" :md="6">
+            <a-form-item label="thinking 全局超时 s（空=不区分）">
+              <a-input-number v-model="form.default_thinking_timeout" :min="1" allow-clear placeholder="如 120" style="width:100%" />
+            </a-form-item>
+          </a-col>
         </a-row>
         <a-row :gutter="24">
           <a-col :xs="12" :sm="12" :md="6">

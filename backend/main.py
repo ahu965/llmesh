@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from pathlib import Path
 
 from backend.database import init_db
-from backend.routers import settings, providers, io, build
+from backend.routers import settings, providers, io, build, simulate, probe, task_groups
 
 
 @asynccontextmanager
@@ -38,6 +38,9 @@ app.include_router(settings.router)
 app.include_router(providers.router)
 app.include_router(io.router)
 app.include_router(build.router)
+app.include_router(simulate.router)
+app.include_router(probe.router)
+app.include_router(task_groups.router)
 
 # 前端静态文件（构建后）
 _DIST = Path(__file__).parent / "frontend" / "dist"

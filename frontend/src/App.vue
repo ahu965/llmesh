@@ -17,6 +17,14 @@
           <template #icon><icon-apps /></template>
           模型管理
         </a-menu-item>
+        <a-menu-item key="/task-groups">
+          <template #icon><icon-storage /></template>
+          任务组
+        </a-menu-item>
+        <a-menu-item key="/simulator">
+          <template #icon><icon-experiment /></template>
+          路由模拟器
+        </a-menu-item>
         <a-menu-item key="/settings">
           <template #icon><icon-settings /></template>
           全局配置
@@ -37,7 +45,7 @@
 
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
-import { IconApps, IconSettings } from '@arco-design/web-vue/es/icon'
+import { IconApps, IconSettings, IconExperiment, IconStorage } from '@arco-design/web-vue/es/icon'
 
 const route = useRoute()
 const router = useRouter()
