@@ -11,5 +11,15 @@ export default defineConfig({
   build: {
     outDir: '../backend/static/dist',
     emptyOutDir: true,
+    chunkSizeWarningLimit: 1600,
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes('@arco-design/web-vue')) return 'vendor-arco'
+          if (id.includes('node_modules/vue') || id.includes('node_modules/vue-router')) return 'vendor-vue'
+          if (id.includes('node_modules/')) return 'vendor-misc'
+        },
+      },
+    },
   },
 })

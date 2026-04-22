@@ -238,6 +238,33 @@ def _simulate(
 
 # ---------- 接口 ----------
 
+class SimulateMeta(BaseModel):
+    tags: List[str]       # 所有模型 tags 去重
+    vendors: List[str]    # 所有启用的 vendor 名去重
+
+
+@router.get("/meta", response_model=SimulateMeta)
+def simulate_meta(session: Session = Depends(get_session)):
+    """返回当前所有启用模型的 tags 和 vendor 集合，用于前端下拉候选"""
+    all_groups = session.exec(select(ProviderGroup).where(ProviderGroup.enabled == True)).all()  # noqa: E712
+    enabled_group_ids = {g.id for g in all_groups}
+    vendors = sorted({g.vendor for g in all_groups})
+
+    all_tags: set = set()
+    entries = session.exec(
+        select(ModelEntry).where(ModelEntry.enabled == True)  # noqa: E712
+    ).all()
+    for m in entries:
+        if m.group_id not in enabled_group_ids:
+            continue
+        if m.tags:
+            try:
+                all_tags.update(json.loads(m.tags))
+            except Exception:
+                pass
+    return SimulateMeta(tags=sorted(all_tags), vendors=vendors)
+
+
 @router.post("", response_model=SimulateResponse)
 def simulate_routing(body: SimulateRequest, session: Session = Depends(get_session)):
     pool, disabled_count = _build_pool_from_db(session)

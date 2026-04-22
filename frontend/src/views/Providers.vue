@@ -11,6 +11,9 @@
       <a-button @click="importVisible = true">
         <template #icon><icon-upload /></template>从文件导入
       </a-button>
+      <a-button @click="batchGenProfile" :loading="batchLoading">
+        <template #icon><icon-robot /></template>批量生成档案
+      </a-button>
     </div>
 
     <!-- 厂商组列表 -->
@@ -150,7 +153,7 @@
                     />
                   </span>
                   <span class="col-action">
-                    <a-space :size="12" style="white-space: nowrap">
+                    <a-space :size="8" style="white-space: nowrap; flex-wrap: nowrap">
                       <!-- 探测按钮（禁用模型不显示） -->
                       <a-tooltip
                         v-if="record.enabled"
@@ -172,6 +175,10 @@
                           <icon-loading v-else class="probe-loading-icon" />
                         </a-link>
                       </a-tooltip>
+                      <a-link @click="showProfile(record)">
+                        <a-badge v-if="record.ai_profile" :dot="true" color="blue">档案</a-badge>
+                        <span v-else style="color:#c9cdd4">档案</span>
+                      </a-link>
                       <a-link @click="showModelModal(group, record)">编辑</a-link>
                       <a-popconfirm content="确认删除？" @ok="deleteModel(group.id!, record.id)">
                         <a-link status="danger">删除</a-link>
@@ -265,7 +272,17 @@
     >
       <a-form :model="modelForm" layout="vertical" size="medium">
         <a-form-item label="模型名" required>
-          <a-input v-model="modelForm.model" placeholder="如 gpt-4o" />
+          <a-input-group>
+            <a-input v-model="modelForm.model" placeholder="如 gpt-4o" style="flex:1" />
+            <a-button
+              :loading="aiSuggestLoading"
+              @click="runAiSuggest"
+              :disabled="!modelForm.model || !activeGroupVendor"
+              title="根据模型名 AI 自动推断字段"
+            >
+              <template #icon><icon-robot /></template>AI 推断
+            </a-button>
+          </a-input-group>
         </a-form-item>
         <a-row :gutter="16">
           <a-col :span="12">
@@ -362,20 +379,87 @@
         </a-alert>
       </a-form>
     </a-modal>
+
+    <!-- 模型档案 Drawer -->
+    <a-drawer
+      v-model:visible="profileVisible"
+      :title="`模型档案 · ${profileModel?.model || ''}`"
+      :width="400"
+      :footer="false"
+    >
+      <div v-if="profileData" class="profile-drawer">
+        <div class="profile-positioning">{{ profileData.positioning }}</div>
+        <div v-if="profileData.description" class="profile-description">{{ profileData.description }}</div>
+
+        <a-divider />
+
+        <div class="profile-section">
+          <div class="profile-section-title">核心强项</div>
+          <ul class="profile-list">
+            <li v-for="s in profileData.strengths" :key="s">{{ s }}</li>
+          </ul>
+        </div>
+
+        <div class="profile-section">
+          <div class="profile-section-title">✅ 适合场景</div>
+          <ul class="profile-list profile-list-green">
+            <li v-for="b in profileData.best_for" :key="b">{{ b }}</li>
+          </ul>
+        </div>
+
+        <div class="profile-section">
+          <div class="profile-section-title">❌ 不适合</div>
+          <ul class="profile-list profile-list-red">
+            <li v-for="n in profileData.not_for" :key="n">{{ n }}</li>
+          </ul>
+        </div>
+
+        <div v-if="profileData.notes" class="profile-section">
+          <div class="profile-section-title">特别说明</div>
+          <div class="profile-notes">{{ profileData.notes }}</div>
+        </div>
+
+        <a-divider />
+
+        <div class="profile-meta">
+          <span>上下文窗口：<b>{{ profileData.context_window ? (profileData.context_window / 1000).toFixed(0) + 'K' : '—' }}</b></span>
+          <span>最大输出：<b>{{ profileData.max_output_tokens ? (profileData.max_output_tokens / 1000).toFixed(0) + 'K' : '—' }}</b></span>
+        </div>
+
+        <a-button
+          type="outline"
+          long
+          style="margin-top:16px"
+          :loading="applyLoading"
+          @click="refreshProfile"
+        >
+          <template #icon><icon-robot /></template>
+          重新生成档案
+        </a-button>
+      </div>
+      <div v-else class="profile-empty">
+        <a-empty description="暂无 AI 档案" />
+        <a-button type="primary" style="margin-top:16px" :loading="applyLoading" @click="refreshProfile">
+          <template #icon><icon-robot /></template>
+          立即生成
+        </a-button>
+      </div>
+    </a-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Message } from '@arco-design/web-vue'
-import { IconPlus, IconDownload, IconUpload, IconRight, IconDragDotVertical, IconLink, IconThunderbolt, IconLoading } from '@arco-design/web-vue/es/icon'
+import { IconPlus, IconDownload, IconUpload, IconRight, IconDragDotVertical, IconLink, IconThunderbolt, IconLoading, IconRobot } from '@arco-design/web-vue/es/icon'
 import draggable from 'vuedraggable'
 import {
   apiListProviders, apiCreateProvider, apiUpdateProvider, apiDeleteProvider,
   apiReorderProviders,
   apiAddModel, apiUpdateModel, apiDeleteModel, apiReorderModels,
   apiExport, apiImportFile, apiProbe,
-  type ProviderGroup, type ModelEntry, type ProbeResponse,
+  apiSuggestModel, apiApplySuggest, apiBatchSuggest,
+  type ProviderGroup, type ModelEntry, type ProbeResponse, type AiProfile,
 } from '../api'
 
 // ---------- state ----------
@@ -394,6 +478,119 @@ const modelForm = ref(emptyModelForm())
 
 const importVisible = ref(false)
 const importPath = ref('')
+
+// ---------- AI 推断 ----------
+const aiSuggestLoading = ref(false)
+const batchLoading = ref(false)
+
+const activeGroupVendor = computed(() => {
+  if (!activeGroupId.value) return ''
+  const g = groups.value.find(g => g.id === activeGroupId.value)
+  return g?.vendor || ''
+})
+
+async function runAiSuggest() {
+  if (!modelForm.value.model || !activeGroupVendor.value) return
+  aiSuggestLoading.value = true
+  try {
+    const res = await apiSuggestModel(activeGroupVendor.value, modelForm.value.model)
+    const s = res.data
+    // 填充表单字段（以已有值为准：已手动设置为 true 的不被 AI 覆盖为 false）
+    if (s.thinking_mode === 'always') {
+      modelForm.value.supports_thinking = true
+      modelForm.value.is_thinking_only = true
+    } else if (s.thinking_mode === 'optional') {
+      modelForm.value.supports_thinking = true
+      // optional 时不改 is_thinking_only，保留已有设置
+    } else {
+      // AI 认为不支持时，不清零已有的 true（以人工设置为准）
+    }
+    if (s.capabilities.includes('vision')) modelForm.value.is_vision = true
+    // tags：与已有值合并去重（人工在前，AI 补充新标签）
+    if (s.tags.length) {
+      const existing: string[] = modelForm.value.tags ? JSON.parse(modelForm.value.tags) : []
+      const merged = [...new Set([...existing, ...s.tags])]
+      modelForm.value.tags = JSON.stringify(merged)
+    }
+    // remark 是人工备注字段，AI 不写入
+    // 缓存 ai_profile 供保存时一起写入
+    modelForm.value.ai_profile = JSON.stringify(s.ai_profile)
+    Message.success('AI 推断完成，请确认字段后保存')
+  } catch (e: any) {
+    Message.error(e?.response?.data?.detail || 'AI 推断失败，请检查 secrets.py 是否已配置')
+  } finally {
+    aiSuggestLoading.value = false
+  }
+}
+
+async function batchGenProfile() {
+  batchLoading.value = true
+  try {
+    const res = await apiBatchSuggest([], false)  // force_refresh=true：强制刷新所有模型档案及推断字段
+    const { done, failed, total } = res.data
+    if (failed > 0) {
+      Message.warning(`批量生成完成：${done}/${total} 成功，${failed} 失败`)
+    } else {
+      Message.success(`批量生成完成：${total} 个模型已生成档案`)
+    }
+    await loadGroups()
+  } catch (e: any) {
+    Message.error(e?.response?.data?.detail || '批量生成失败')
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+// ---------- 档案 Drawer ----------
+const profileVisible = ref(false)
+const profileModel = ref<ModelEntry | null>(null)
+const applyLoading = ref(false)
+
+const profileData = computed<AiProfile | null>(() => {
+  if (!profileModel.value?.ai_profile) return null
+  try {
+    return JSON.parse(profileModel.value.ai_profile)
+  } catch {
+    return null
+  }
+})
+
+function showProfile(model: ModelEntry) {
+  profileModel.value = model
+  profileVisible.value = true
+}
+
+async function refreshProfile() {
+  if (!profileModel.value?.id) return
+  applyLoading.value = true
+  try {
+    const res = await apiApplySuggest(profileModel.value.id)
+    const d = res.data
+    // 需要同步回写的字段（AI 推断结果）
+    const inferred = {
+      ai_profile: JSON.stringify(d.ai_profile),
+      supports_thinking: d.supports_thinking,
+      is_thinking_only: d.is_thinking_only,
+      is_vision: d.is_vision,
+      tags: d.tags,
+    }
+    // 更新本地模型数据
+    profileModel.value = { ...profileModel.value, ...inferred }
+    // 同步 groups 中的数据
+    for (const g of groups.value) {
+      const idx = g.models.findIndex(m => m.id === profileModel.value!.id)
+      if (idx !== -1) {
+        g.models[idx] = { ...g.models[idx], ...inferred }
+        break
+      }
+    }
+    Message.success('档案已更新')
+  } catch (e: any) {
+    Message.error(e?.response?.data?.detail || '生成失败')
+  } finally {
+    applyLoading.value = false
+  }
+}
 
 // ---------- probe ----------
 // key = model.id，value = { loading, result }
@@ -466,6 +663,7 @@ function emptyModelForm() {
     expires_at: null as string | null, priority: null as number | null,
     is_vision: false, tags: null as string | null, enabled: true,
     thinking_timeout: null as number | null,
+    ai_profile: null as string | null,
   }
 }
 function maskKey(key: string) {
@@ -540,7 +738,7 @@ function showModelModal(group: ProviderGroup, model: ModelEntry | null) {
   activeGroupId.value = group.id!
   editingModel.value = model
   modelForm.value = model
-    ? { model: model.model, weight: model.weight, timeout: model.timeout, remark: model.remark, supports_thinking: model.supports_thinking, is_thinking_only: model.is_thinking_only, extra_body: model.extra_body ?? undefined, expires_at: model.expires_at, priority: model.priority, is_vision: model.is_vision, tags: model.tags, enabled: model.enabled, thinking_timeout: model.thinking_timeout }
+    ? { model: model.model, weight: model.weight, timeout: model.timeout, remark: model.remark, supports_thinking: model.supports_thinking, is_thinking_only: model.is_thinking_only, extra_body: model.extra_body ?? undefined, expires_at: model.expires_at, priority: model.priority, is_vision: model.is_vision, tags: model.tags, enabled: model.enabled, thinking_timeout: model.thinking_timeout, ai_profile: model.ai_profile }
     : emptyModelForm()
   modelVisible.value = true
 }
@@ -726,6 +924,7 @@ async function handleImport() {
 .group-body {
   border-top: 1px solid #f2f3f5;
   padding: 0 0 8px 0;
+  overflow-x: auto;
 }
 
 .text-muted {
@@ -756,6 +955,7 @@ async function handleImport() {
   padding: 8px 16px;
   gap: 0;
   font-size: 12px;
+  min-width: 900px;
 }
 .model-drag-header {
   background: #fafafa;
@@ -780,7 +980,7 @@ async function handleImport() {
 .col-expire  { width: 140px; flex-shrink: 0; }
 .col-remark  { flex: 1; min-width: 60px; color: #86909c; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .col-status  { width: 72px; flex-shrink: 0; }
-.col-action  { width: 140px; flex-shrink: 0; text-align: right; }
+.col-action  { width: 180px; flex-shrink: 0; text-align: right; }
 
 .probe-loading-icon {
   animation: spin 1s linear infinite;
@@ -794,5 +994,65 @@ async function handleImport() {
   font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
   font-size: 12.5px;
   color: #1d2129;
+}
+
+/* 档案 Drawer */
+.profile-drawer {
+  padding: 4px 0;
+}
+.profile-positioning {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1d2129;
+  padding: 4px 0 4px;
+}
+.profile-description {
+  font-size: 12px;
+  color: #86909c;
+  padding: 0 0 8px;
+  line-height: 1.6;
+}
+.profile-section {
+  margin-bottom: 16px;
+}
+.profile-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #86909c;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.profile-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #1d2129;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.profile-list-green li::marker { color: #00b42a; }
+.profile-list-red li::marker { color: #f53f3f; }
+.profile-notes {
+  font-size: 13px;
+  color: #4e5969;
+  background: #f7f8fa;
+  border-radius: 6px;
+  padding: 8px 12px;
+  line-height: 1.6;
+}
+.profile-meta {
+  display: flex;
+  gap: 24px;
+  font-size: 12px;
+  color: #86909c;
+}
+.profile-meta b {
+  color: #1d2129;
+}
+.profile-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 0;
 }
 </style>

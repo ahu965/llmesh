@@ -1,8 +1,8 @@
 <template>
-  <a-layout style="min-height: 100vh; background: #f2f3f5">
+  <a-layout class="app-layout">
     <a-layout-sider
       :width="200"
-      style="background: #fff; border-right: 1px solid #e5e6eb; box-shadow: 2px 0 8px rgba(0,0,0,0.04)"
+      class="sider"
     >
       <div class="logo">
         <span class="logo-text">llmesh</span>
@@ -32,7 +32,7 @@
       </a-menu>
     </a-layout-sider>
 
-    <a-layout>
+    <a-layout class="main-layout">
       <a-layout-header class="header">
         <span class="page-title">{{ route.meta.title }}</span>
       </a-layout-header>
@@ -52,12 +52,35 @@ const router = useRouter()
 </script>
 
 <style scoped>
+.app-layout {
+  height: 100vh;
+  overflow: hidden;
+  background: #f2f3f5;
+}
+
+.sider {
+  height: 100vh;
+  overflow: hidden;
+  background: #fff !important;
+  border-right: 1px solid #e5e6eb;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
+  flex-shrink: 0;
+}
+
+.main-layout {
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 .logo {
   height: 60px;
   display: flex;
   align-items: center;
   padding: 0 16px;
   border-bottom: 1px solid #f2f3f5;
+  flex-shrink: 0;
 }
 .logo-text {
   font-size: 18px;
@@ -73,6 +96,7 @@ const router = useRouter()
   border-bottom: 1px solid #e5e6eb;
   display: flex;
   align-items: center;
+  flex-shrink: 0;
 }
 .page-title {
   font-size: 15px;
@@ -82,7 +106,8 @@ const router = useRouter()
 
 .content {
   padding: 20px 24px;
-  min-height: calc(100vh - 52px);
-  overflow: auto;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 </style>

@@ -9,11 +9,14 @@
       <div class="param-body">
         <a-form layout="inline" :model="form" class="param-form">
           <a-form-item label="prefer">
-            <a-input
+            <a-select
               v-model="form.prefer"
-              placeholder="如 openai,gpt（逗号分隔）"
+              multiple
+              allow-create
               allow-clear
-              style="width:220px"
+              placeholder="选择或输入 vendor/关键字"
+              style="width:240px"
+              :options="meta.vendors.map(v => ({ label: v, value: v }))"
             />
           </a-form-item>
 
@@ -33,20 +36,26 @@
           </a-form-item>
 
           <a-form-item label="tags">
-            <a-input
+            <a-select
               v-model="form.tags"
-              placeholder="如 cheap,fast（逗号分隔）"
+              multiple
+              allow-create
               allow-clear
-              style="width:200px"
+              placeholder="选择或输入 tag"
+              style="width:220px"
+              :options="meta.tags.map(t => ({ label: t, value: t }))"
             />
           </a-form-item>
 
           <a-form-item label="exclude_tags">
-            <a-input
+            <a-select
               v-model="form.exclude_tags"
-              placeholder="如 math,translate（逗号分隔）"
+              multiple
+              allow-create
               allow-clear
-              style="width:200px"
+              placeholder="选择或输入排除 tag"
+              style="width:220px"
+              :options="meta.tags.map(t => ({ label: t, value: t }))"
             />
           </a-form-item>
 
@@ -63,6 +72,15 @@
         <div class="code-hint">
           <span class="code-label">等效调用：</span>
           <code class="code-line">{{ codeHint }}</code>
+          <a-tooltip content="复制">
+            <a-button
+              size="mini"
+              class="copy-btn"
+              @click="copyCode"
+            >
+              <template #icon><icon-copy /></template>
+            </a-button>
+          </a-tooltip>
         </div>
       </div>
     </div>
@@ -74,7 +92,7 @@
         <a-space wrap>
           <a-tag v-if="result.disabled_count > 0" color="gray">已禁用 {{ result.disabled_count }} 个模型（不参与路由）</a-tag>
           <a-tag v-if="result.filtered_out_count > 0" color="orange">硬过滤 {{ result.filtered_out_count }} 个模型</a-tag>
-          <a-tag v-if="form.exclude_tags" color="red">排除 tag：{{ form.exclude_tags }}</a-tag>
+          <a-tag v-if="form.exclude_tags.length > 0" color="red">排除 tag：{{ form.exclude_tags.join(', ') }}</a-tag>
           <span v-if="result.filter_reason" class="filter-reason">{{ result.filter_reason }}</span>
         </a-space>
         <span v-if="result.layers.length === 0" style="color:#f53f3f;font-weight:600">
@@ -157,39 +175,49 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Message } from '@arco-design/web-vue'
-import { IconExperiment, IconPlayArrow } from '@arco-design/web-vue/es/icon'
-import { apiSimulate, type SimulateResponse, type SimulateLayer } from '../api'
+import { IconExperiment, IconPlayArrow, IconCopy } from '@arco-design/web-vue/es/icon'
+import { apiSimulate, apiSimulateMeta, type SimulateResponse, type SimulateLayer } from '../api'
 
 const loading = ref(false)
 const result = ref<SimulateResponse | null>(null)
 
+const meta = ref({ tags: [] as string[], vendors: [] as string[] })
+
+onMounted(async () => {
+  try {
+    const res = await apiSimulateMeta()
+    meta.value = res.data
+  } catch {
+    // 静默失败，下拉候选为空时仍可手动输入
+  }
+})
+
 const form = ref({
-  prefer: '',
+  prefer: [] as string[],
   thinking: null as boolean | null,
   vision: null as boolean | null,
-  tags: '',
-  exclude_tags: '',
+  tags: [] as string[],
+  exclude_tags: [] as string[],
 })
 
 function reset() {
-  form.value = { prefer: '', thinking: null, vision: null, tags: '', exclude_tags: '' }
+  form.value = { prefer: [], thinking: null, vision: null, tags: [], exclude_tags: [] }
   result.value = null
 }
 
 async function run() {
   loading.value = true
   try {
-    // a-select 绑定 null 值时可能返回字符串 "null"，需显式还原为真实 null/boolean
     const toTriBool = (v: unknown): boolean | null =>
       v === null || v === 'null' || v === undefined ? null : Boolean(v)
     const res = await apiSimulate({
-      prefer: form.value.prefer || null,
+      prefer: form.value.prefer.length ? form.value.prefer.join(',') : null,
       thinking: toTriBool(form.value.thinking),
       vision: toTriBool(form.value.vision),
-      tags: form.value.tags || null,
-      exclude_tags: form.value.exclude_tags || null,
+      tags: form.value.tags.length ? form.value.tags.join(',') : null,
+      exclude_tags: form.value.exclude_tags.length ? form.value.exclude_tags.join(',') : null,
     })
     result.value = res.data
   } catch {
@@ -199,21 +227,28 @@ async function run() {
   }
 }
 
-// 当前层是否存在 prefer/tags 命中（影响非命中行样式）
 function hasActiveFilter(layer: SimulateLayer): boolean {
   return layer.models.some(m => m.is_prefer_hit || m.is_tags_hit)
 }
 
-// 生成等效代码提示
 const codeHint = computed(() => {
   const parts: string[] = []
-  if (form.value.prefer) parts.push(`prefer="${form.value.prefer}"`)
+  if (form.value.prefer.length) parts.push(`prefer="${form.value.prefer.join(',')}"`)
   if (form.value.thinking !== null) parts.push(`thinking=${form.value.thinking}`)
   if (form.value.vision !== null) parts.push(`vision=${form.value.vision}`)
-  if (form.value.tags) parts.push(`tags="${form.value.tags}"`)
-  if (form.value.exclude_tags) parts.push(`exclude_tags="${form.value.exclude_tags}"`)
+  if (form.value.tags.length) parts.push(`tags="${form.value.tags.join(',')}"`)
+  if (form.value.exclude_tags.length) parts.push(`exclude_tags="${form.value.exclude_tags.join(',')}"`)
   return `get_llm(${parts.join(', ')})`
 })
+
+async function copyCode() {
+  try {
+    await navigator.clipboard.writeText(codeHint.value)
+    Message.success('已复制到剪贴板')
+  } catch {
+    Message.error('复制失败，请手动选中复制')
+  }
+}
 
 // 初始自动执行一次（展示全量无过滤状态）
 run()
@@ -274,6 +309,14 @@ run()
 .code-line {
   font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
   font-size: 13px;
+  color: #165dff;
+  flex: 1;
+}
+.copy-btn {
+  flex-shrink: 0;
+  color: #86909c;
+}
+.copy-btn:hover {
   color: #165dff;
 }
 

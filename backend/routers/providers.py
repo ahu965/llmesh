@@ -31,6 +31,7 @@ class ModelEntryRead(BaseModel):
     tags: Optional[str]
     enabled: bool = True
     thinking_timeout: Optional[int]
+    ai_profile: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -50,6 +51,7 @@ class ModelEntryWrite(BaseModel):
     tags: Optional[str] = None
     enabled: bool = True
     thinking_timeout: Optional[int] = None
+    ai_profile: Optional[str] = None
 
 
 class ProviderGroupRead(BaseModel):
@@ -107,7 +109,6 @@ def _fix_model(m: ModelEntry) -> ModelEntry:
     if m.enabled is None:
         m.enabled = True
     return m
-
 
 def _load_group_read(g: ProviderGroup, session: Session) -> ProviderGroupRead:
     """读取单个 ProviderGroup 及其 ModelEntry，返回 ProviderGroupRead（含 NULL 回填）"""

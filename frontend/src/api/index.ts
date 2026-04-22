@@ -22,6 +22,7 @@ export interface ModelEntry {
   tags: string | null
   enabled: boolean
   thinking_timeout: number | null
+  ai_profile: string | null
 }
 
 export interface ProviderGroup {
@@ -135,6 +136,13 @@ export interface SimulateResponse {
   filter_reason: string
 }
 
+export interface SimulateMeta {
+  tags: string[]
+  vendors: string[]
+}
+
+export const apiSimulateMeta = () => http.get<SimulateMeta>('/api/simulate/meta')
+
 export const apiSimulate = (body: SimulateRequest) =>
   http.post<SimulateResponse>('/api/simulate', body)
 
@@ -179,3 +187,32 @@ export interface ProbeResponse {
 
 export const apiProbe = (groupId: number, modelId: number) =>
   http.post<ProbeResponse>('/api/probe', { group_id: groupId, model_id: modelId }, { timeout: 20000 })
+
+// ---------- AI Suggest ----------
+export interface AiProfile {
+  positioning: string
+  description?: string      // AI 一句话适用场景描述（归入档案，不写入 entry.remark）
+  strengths: string[]
+  best_for: string[]
+  not_for: string[]
+  notes: string
+  context_window: number
+  max_output_tokens: number
+}
+
+export interface SuggestModelResponse {
+  thinking_mode: string
+  capabilities: string[]
+  tags: string[]
+  remark: string
+  ai_profile: AiProfile
+}
+
+export const apiSuggestModel = (vendor: string, model_name: string) =>
+  http.post<SuggestModelResponse>('/api/ai/suggest-model', { vendor, model_name }, { timeout: 60000 })
+
+export const apiApplySuggest = (modelId: number) =>
+  http.post(`/api/ai/suggest-model/apply/${modelId}`, {}, { timeout: 60000 })
+
+export const apiBatchSuggest = (modelIds: number[] = [], forceRefresh = false) =>
+  http.post('/api/ai/suggest-model/batch', { model_ids: modelIds, force_refresh: forceRefresh }, { timeout: 300000 })

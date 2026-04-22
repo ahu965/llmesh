@@ -197,8 +197,8 @@ class MultiVendorLLMPool:
                 if thinking is True and model_config.get("supports_thinking"):
                     # thinking=True：只对支持思考的模型开启
                     extra_body["enable_thinking"] = True
-                elif thinking is False:
-                    # thinking=False：无条件写入，确保默认开启思考的模型也能被关闭
+                elif thinking is False and not model_config.get("is_thinking_only"):
+                    # thinking=False：排除常开思考模型（is_thinking_only），它们只允许 enable_thinking=True
                     extra_body["enable_thinking"] = False
                 if extra_body:
                     kwargs["extra_body"] = extra_body

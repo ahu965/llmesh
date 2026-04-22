@@ -68,6 +68,7 @@ class ModelEntry(SQLModel, table=True):
     tags: Optional[str] = Field(default=None)          # JSON 数组字符串，如 '["cheap","fast"]'
     enabled: bool = Field(default=True)
     thinking_timeout: Optional[int] = Field(default=None)  # thinking 模式专用超时，None=不单独设置
+    ai_profile: Optional[str] = Field(default=None)        # AI 生成的结构化模型档案（JSON 字符串）
 
     def get_extra_body(self) -> Optional[Dict[str, Any]]:
         if self.extra_body:

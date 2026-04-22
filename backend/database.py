@@ -58,6 +58,7 @@ def _migrate_db():
         ("modelentry",     "is_vision",          "INTEGER"),
         ("modelentry",     "tags",               "TEXT"),
         ("modelentry",     "thinking_timeout",   "INTEGER"),
+        ("modelentry",     "ai_profile",         "TEXT"),
         ("providergroup",  "priority",       "INTEGER"),
         ("providergroup",  "alias",          "TEXT"),
         ("providergroup",  "website",        "TEXT"),

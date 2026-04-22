@@ -40,8 +40,21 @@ TASK_GROUPS = {task_groups}
 
 def _build_model_entry(entry: ModelEntry, group: ProviderGroup) -> dict | str:
     """构造单个模型条目，若只有 model 字段则简化为字符串"""
+    import json as _json
     extra_body = entry.get_extra_body()
     effective_priority = entry.priority if entry.priority is not None else group.priority
+
+    # 合并 tags：模型自身 tags + billing_mode 自动注入
+    base_tags: list = []
+    if entry.tags:
+        try:
+            base_tags = _json.loads(entry.tags)
+        except Exception:
+            pass
+    if group.billing_mode and group.billing_mode not in base_tags:
+        base_tags = base_tags + [group.billing_mode]
+    effective_tags = base_tags if base_tags else None
+
     has_overrides = any([
         entry.weight is not None and entry.weight != group.weight,
         entry.timeout is not None and entry.timeout != group.timeout,
@@ -49,7 +62,7 @@ def _build_model_entry(entry: ModelEntry, group: ProviderGroup) -> dict | str:
         entry.supports_thinking,
         entry.is_thinking_only,
         entry.is_vision,
-        entry.tags,
+        effective_tags,
         extra_body,
         effective_priority != 0,
         entry.thinking_timeout is not None,
@@ -69,12 +82,8 @@ def _build_model_entry(entry: ModelEntry, group: ProviderGroup) -> dict | str:
         d["is_thinking_only"] = True
     if entry.is_vision:
         d["is_vision"] = True
-    if entry.tags:
-        import json as _json
-        try:
-            d["tags"] = _json.loads(entry.tags)
-        except Exception:
-            pass
+    if effective_tags:
+        d["tags"] = effective_tags
     if effective_priority != 0:
         d["priority"] = effective_priority
     if extra_body:
@@ -113,6 +122,10 @@ def export_secrets(session: Session, output_path: Optional[str | Path] = None) -
         }
         if group.weight != 1:
             g["weight"] = group.weight
+        if group.priority != 0:
+            g["priority"] = group.priority
+        if group.timeout != 60:
+            g["timeout"] = group.timeout
         if group.remark:
             g["remark"] = group.remark
         g["models"] = models_list

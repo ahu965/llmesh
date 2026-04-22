@@ -50,8 +50,22 @@
   }
 }
 
+html,
 body {
   margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+#app {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  text-align: left !important;
+  border-inline: none !important;
+  min-height: unset !important;
+  height: 100vh;
+  display: block !important;
 }
 
 h1,
