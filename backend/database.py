@@ -10,18 +10,21 @@ from sqlalchemy import event
 from pydantic_settings import BaseSettings
 
 
+_PROJECT_ROOT = Path(__file__).parent.parent
+
+
 class Settings(BaseSettings):
-    db_path: str = "data/llmesh.db"
+    db_path: str = ""
     db_key: str = "llmesh_default_key"   # 加密密钥，生产环境务必通过 .env 覆盖
 
     class Config:
-        env_file = ".env"
+        env_file = str(_PROJECT_ROOT / ".env")
         extra = "ignore"
 
 
 settings = Settings()
 
-_DB_PATH = Path(settings.db_path)
+_DB_PATH = Path(settings.db_path) if settings.db_path else _PROJECT_ROOT / "data" / "llmesh.db"
 _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # 使用普通 sqlite:/// URL，密钥通过连接事件注入 PRAGMA key

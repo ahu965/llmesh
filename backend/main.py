@@ -43,7 +43,7 @@ app.include_router(probe.router)
 app.include_router(task_groups.router)
 
 # 前端静态文件（构建后）
-_DIST = Path(__file__).parent / "frontend" / "dist"
+_DIST = Path(__file__).parent / "static" / "dist"
 if _DIST.exists():
     app.mount("/assets", StaticFiles(directory=str(_DIST / "assets")), name="assets")
 

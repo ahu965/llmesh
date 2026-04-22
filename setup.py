@@ -2,7 +2,6 @@ from datetime import datetime
 import compileall
 import os
 import shutil
-import sys
 
 from setuptools import setup, find_packages
 from setuptools.command.build_py import build_py
@@ -81,9 +80,8 @@ setup(
     packages=find_packages(include=["llmesh", "llmesh.*"]),
     package_data={"": ["**/*.pyc", "*.pyc"]},
     install_requires=[
-        "pydantic>=2.10,<3.0",
-        "langchain-openai>=1.1,<2.0",
-        "openai>=1.50,<2.0",
+        "langchain-openai",
+        "openai",
     ],
     author="huyanping",
     description="Multi-vendor LLM routing SDK",

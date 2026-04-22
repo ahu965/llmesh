@@ -44,7 +44,7 @@ cp .env.example .env
 uv sync
 
 # 启动后端
-uv run uvicorn backend.main:app --reload --reload-dir backend --port 8000
+uv run uvicorn backend.main:app --reload --reload-dir backend --port 8001
 ```
 
 ### 前端开发模式
@@ -63,6 +63,106 @@ npm run build
 # 构建产物输出到 backend/static/dist/
 # 后端直接托管静态文件，访问 http://localhost:8000 即可
 ```
+
+---
+
+## macOS 桌面应用（.app bundle）
+
+llmesh 支持打包为 macOS 原生 .app，双击即可启动，通过 pywebview 提供桌面窗口。
+
+### 前置依赖
+
+- Xcode Command Line Tools：`xcode-select --install`
+- ImageMagick（生成图标）：`brew install imagemagick`
+
+### 1. 生成图标
+
+```bash
+# 1. 生成圆角背景
+magick -size 860x860 gradient:'#5b6ef5-#2563eb' \
+  \( +clone -alpha extract \
+     -draw "fill white roundrectangle 0,0,859,859,190,190" \) \
+  -alpha off -compose CopyOpacity -composite rounded.png
+
+# 2. 放置到 1024×1024 画布
+magick -size 1024x1024 xc:none \
+  rounded.png -geometry +82+82 -composite \
+  -font "HelveticaNeue" -pointsize 170 -fill white \
+  -gravity Center -annotate 0 "llmesh" llmesh.png
+
+rm rounded.png
+
+# 3. 生成 .icns（macOS 图标格式）
+mkdir -p llmesh.iconset
+for size in 16 32 64 128 256 512; do
+  magick llmesh.png -resize ${size}x${size} llmesh.iconset/icon_${size}x${size}.png
+  magick llmesh.png -resize $((size*2))x$((size*2)) llmesh.iconset/icon_${size}x${size}@2x.png
+done
+iconutil -c icns llmesh.iconset -o llmesh.icns
+rm -rf llmesh.iconset
+```
+
+### 2. 编辑 launcher.c
+
+`launcher.c` 是 .app 的启动器源码，**需要修改为本机路径**后编译：
+
+```c
+// 修改以下三个路径为实际值
+const char *python  = "/path/to/uv/python/cpython-3.x.x-.../bin/python3.x";
+const char *script  = "/path/to/llmesh/run.py";
+const char *projdir = "/path/to/llmesh";
+
+// 同时修改 envp[] 中所有包含绝对路径的条目：
+// PYTHONHOME=...
+// PYTHONPATH=.../site-packages:...
+// VIRTUAL_ENV=...
+// PATH=.../bin:...
+// HOME=...
+// USER=...
+```
+
+查看当前 Python 路径：
+
+```bash
+# uv 管理的 Python 位置
+uv python find
+
+# venv site-packages 位置
+.venv/bin/python -c "import site; print(site.getsitepackages())"
+```
+
+### 3. 编译并签名
+
+```bash
+# 编译（Apple Silicon）
+cc -o llmesh.app/Contents/MacOS/llmesh launcher.c -target arm64-apple-macos11
+
+# Intel Mac
+# cc -o llmesh.app/Contents/MacOS/llmesh launcher.c -target x86_64-apple-macos10.15
+
+# ad-hoc 签名（无需开发者证书）
+codesign --force --deep --sign - llmesh.app
+```
+
+> **注意：** 每次修改 `launcher.c` 后需要重新执行编译和签名命令。`Info.plist` 修改后只需重新签名（无需重新编译）。
+
+### 4. 配置 .app bundle 结构
+
+确保 `llmesh.app/Contents/Resources/llmesh.icns` 存在：
+
+```bash
+cp llmesh.icns llmesh.app/Contents/Resources/llmesh.icns
+```
+
+### 5. 首次启动 Gatekeeper 问题
+
+macOS 对未经 App Store 或开发者证书签名的应用会弹出警告。解除方式：
+
+```bash
+xattr -cr llmesh.app
+```
+
+或在 Finder 中右键 → 打开 → 选择「打开」。
 
 ---
 

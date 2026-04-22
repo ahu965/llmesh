@@ -109,18 +109,18 @@
         <a-form-item label="候选模型（pinned）">
           <div class="pinned-editor">
             <div
-              v-for="(vm, idx) in form.pinned"
+              v-for="(_, idx) in form.pinned"
               :key="idx"
               class="pinned-editor-row"
             >
               <span class="pinned-editor-idx">{{ idx + 1 }}</span>
               <a-select
-                v-model="form.pinned[idx]"
+                v-model="form.pinned![idx]"
                 :options="modelOptions"
                 placeholder="选择模型"
                 allow-search
                 style="flex:1"
-                @change="(v: string) => form.pinned[idx] = v"
+                @change="(v: string) => form.pinned![idx] = v"
               />
               <a-button
                 shape="circle"
@@ -131,7 +131,7 @@
               <a-button v-if="idx > 0" shape="circle" size="mini" @click="movePinnedUp(idx)">
                 <template #icon><icon-up /></template>
               </a-button>
-              <a-button v-if="idx < form.pinned.length - 1" shape="circle" size="mini" @click="movePinnedDown(idx)">
+              <a-button v-if="idx < form.pinned!.length - 1" shape="circle" size="mini" @click="movePinnedDown(idx)">
                 <template #icon><icon-down /></template>
               </a-button>
             </div>
@@ -188,7 +188,7 @@
         </a-form-item>
 
         <a-form-item label="备注">
-          <a-textarea v-model="form.remark" placeholder="任务场景说明，仅用于记录" :auto-size="{ minRows: 2, maxRows: 4 }" allow-clear />
+          <a-textarea v-model="formRemark" placeholder="任务场景说明，仅用于记录" :auto-size="{ minRows: 2, maxRows: 4 }" allow-clear />
         </a-form-item>
 
         <a-form-item label="状态">
@@ -201,7 +201,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Message } from '@arco-design/web-vue'
 import {
   IconPlus, IconMinus, IconUp, IconDown,
@@ -272,6 +272,12 @@ const emptyForm = (): TaskGroupWrite & { id?: number } => ({
 
 const form = ref<TaskGroupWrite & { id?: number }>(emptyForm())
 
+// a-textarea 要求 string，用计算属性桥接
+const formRemark = computed<string>({
+  get: () => form.value.remark ?? '',
+  set: (v: string) => { form.value.remark = v || null },
+})
+
 function openCreate() {
   editingId.value = null
   form.value = emptyForm()
@@ -304,7 +310,7 @@ async function saveGroup() {
   const payload: TaskGroupWrite = {
     name: form.value.name.trim(),
     display_name: form.value.display_name || null,
-    pinned: form.value.pinned.filter(v => v),
+    pinned: (form.value.pinned ?? []).filter(v => v),
     exclude_tags: form.value.exclude_tags,
     tags: form.value.tags,
     prefer: form.value.prefer,

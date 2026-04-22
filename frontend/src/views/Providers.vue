@@ -60,7 +60,7 @@
             <div class="group-header-right" @click.stop>
               <a-button
                 size="small"
-                :disabled="!group.models.some(m => m.enabled) || groupProbeState[group.id!]?.loading > 0"
+                :disabled="!group.models.some((m: ModelEntry) => m.enabled) || groupProbeState[group.id!]?.loading > 0"
                 @click="probeGroup(group)"
               >
                 <template #icon>
@@ -462,7 +462,7 @@ function emptyModelForm() {
   return {
     model: '', weight: null as number | null, timeout: null as number | null,
     remark: null as string | null, supports_thinking: false,
-    is_thinking_only: false, extra_body: null as string | null,
+    is_thinking_only: false, extra_body: undefined as string | undefined,
     expires_at: null as string | null, priority: null as number | null,
     is_vision: false, tags: null as string | null, enabled: true,
     thinking_timeout: null as number | null,
@@ -540,16 +540,17 @@ function showModelModal(group: ProviderGroup, model: ModelEntry | null) {
   activeGroupId.value = group.id!
   editingModel.value = model
   modelForm.value = model
-    ? { model: model.model, weight: model.weight, timeout: model.timeout, remark: model.remark, supports_thinking: model.supports_thinking, is_thinking_only: model.is_thinking_only, extra_body: model.extra_body, expires_at: model.expires_at, priority: model.priority, is_vision: model.is_vision, tags: model.tags, enabled: model.enabled, thinking_timeout: model.thinking_timeout }
+    ? { model: model.model, weight: model.weight, timeout: model.timeout, remark: model.remark, supports_thinking: model.supports_thinking, is_thinking_only: model.is_thinking_only, extra_body: model.extra_body ?? undefined, expires_at: model.expires_at, priority: model.priority, is_vision: model.is_vision, tags: model.tags, enabled: model.enabled, thinking_timeout: model.thinking_timeout }
     : emptyModelForm()
   modelVisible.value = true
 }
 async function saveModel() {
   try {
+    const payload = { ...modelForm.value, extra_body: modelForm.value.extra_body ?? null }
     if (editingModel.value?.id) {
-      await apiUpdateModel(activeGroupId.value!, editingModel.value.id, modelForm.value)
+      await apiUpdateModel(activeGroupId.value!, editingModel.value.id, payload)
     } else {
-      await apiAddModel(activeGroupId.value!, modelForm.value)
+      await apiAddModel(activeGroupId.value!, payload)
     }
     modelVisible.value = false
     await loadGroups()

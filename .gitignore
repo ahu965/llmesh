@@ -23,3 +23,14 @@ backend/static/dist/
 # build
 **/secrets.py
 
+# macOS .app bundle — 编译产物与签名，不入库
+llmesh.app/Contents/MacOS/
+llmesh.app/Contents/_CodeSignature/
+llmesh.app/Contents/Resources/
+
+# 图标二进制（由 llmesh.png 生成，可本地重建）
+llmesh.icns
+
+# macOS 系统文件
+.DS_Store
+
