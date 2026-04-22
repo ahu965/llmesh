@@ -36,23 +36,40 @@ def _build_model_pool() -> List[Dict]:
             if not m.get("model"):
                 logger.warning(f"忽略缺少 model 字段的条目：{group['vendor']}")
                 continue
+
+            # 解析 thinking_mode（新格式）+ 兼容旧布尔字段
+            thinking_mode: str = m.get("thinking_mode", "")
+            if not thinking_mode:
+                # 旧格式兼容
+                if m.get("supports_thinking") and m.get("is_thinking_only"):
+                    thinking_mode = "always"
+                elif m.get("supports_thinking"):
+                    thinking_mode = "optional"
+                else:
+                    thinking_mode = "none"
+
+            # 解析 capabilities（新格式）+ 兼容旧 is_vision
+            caps: list = m.get("capabilities") or []
+            if not caps:
+                caps = ["text", "vision"] if m.get("is_vision") else ["text"]
+
             entry: Dict = {
-                "vendor":   group["vendor"],
-                "api_key":  group["api_key"],
-                "base_url": group["base_url"],
-                "model":    m["model"],
-                "weight":   m.get("weight",  group.get("weight",  1)),
-                "timeout":  m.get("timeout", group.get("timeout", GLOBAL_SETTINGS["default_timeout"])),
-                "priority": m.get("priority", group_priority),
+                "vendor":        group["vendor"],
+                "api_key":       group["api_key"],
+                "base_url":      group["base_url"],
+                "model":         m["model"],
+                "weight":        m.get("weight",  group.get("weight",  1)),
+                "timeout":       m.get("timeout", group.get("timeout", GLOBAL_SETTINGS["default_timeout"])),
+                "priority":      m.get("priority", group_priority),
+                "thinking_mode": thinking_mode,
+                "capabilities":  caps,
+                # 旧字段保留（pool.py 过渡期兼容，后续删除）
+                "supports_thinking": thinking_mode in ("optional", "always"),
+                "is_thinking_only":  thinking_mode == "always",
+                "is_vision":         "vision" in caps,
             }
             if "remark" in m:
                 entry["remark"] = m["remark"]
-            if m.get("supports_thinking") or group.get("supports_thinking"):
-                entry["supports_thinking"] = True
-            if m.get("is_thinking_only") or group.get("is_thinking_only"):
-                entry["is_thinking_only"] = True
-            if m.get("is_vision") or group.get("is_vision"):
-                entry["is_vision"] = True
             if "tags" in m:
                 entry["tags"] = list(m["tags"])
             elif "tags" in group:
@@ -65,6 +82,8 @@ def _build_model_pool() -> List[Dict]:
                 entry["thinking_timeout"] = m["thinking_timeout"]
             elif GLOBAL_SETTINGS.get("default_thinking_timeout") is not None:
                 entry["thinking_timeout"] = GLOBAL_SETTINGS["default_thinking_timeout"]
+            if "max_tokens" in m:
+                entry["max_tokens"] = m["max_tokens"]
             valid.append(entry)
 
     if not valid:
@@ -91,14 +110,24 @@ def _build_task_groups() -> Dict[str, Dict[str, Any]]:
         name = tg.get("name", "").strip()
         if not name:
             continue
+        # pinned：兼容字符串（旧格式）和 dict（新格式 {"vm": "vendor/model", "thinking": ...}）
+        # 统一转为 dict 列表，pool.py 直接读取
+        raw_pinned = tg.get("pinned") or []
+        pinned_items = []
+        for item in raw_pinned:
+            if isinstance(item, str):
+                pinned_items.append({"vm": item, "thinking": None})
+            elif isinstance(item, dict):
+                pinned_items.append({"vm": item.get("vm", ""), "thinking": item.get("thinking")})
         result[name] = {
             "display_name":  tg.get("display_name"),
-            "pinned":        list(tg.get("pinned") or []),
+            "pinned":        pinned_items,          # List[{"vm", "thinking"}]
             "exclude_tags":  list(tg.get("exclude_tags") or []),
             "tags":          list(tg.get("tags") or []),
             "prefer":        list(tg.get("prefer") or []),
-            "thinking":      tg.get("thinking"),   # None / True / False
+            "thinking":      tg.get("thinking"),    # None / True / False
             "remark":        tg.get("remark"),
+            "max_tokens":    tg.get("max_tokens"),  # None = 继承全局
         }
     return result
 

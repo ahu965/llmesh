@@ -4,6 +4,7 @@
 - GET  /api/build/status → 返回发布状态（上次发包时间、DB 变更时间、是否需要发包）
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -57,10 +58,14 @@ def _run_stream(cmd: list[str], cwd: str, timeout: int = 180) -> Generator[str, 
     用法：gen = _run_stream(...)；for line in gen: ...；code = gen.return_value（不直接支持，见调用侧）
     实际通过 StopIteration.value 获取 returncode。
     """
+    # 清除 PYTHONHOME / PYTHONPATH，避免 uv 注入的环境变量污染子进程的标准库解析
+    clean_env = os.environ.copy()
+    clean_env.pop("PYTHONHOME", None)
+    clean_env.pop("PYTHONPATH", None)
     proc = subprocess.Popen(
         cmd, cwd=cwd,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, bufsize=1,
+        text=True, bufsize=1, env=clean_env,
     )
     assert proc.stdout is not None
     try:

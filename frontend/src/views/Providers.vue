@@ -128,9 +128,9 @@
                   </span>
                   <span class="col-features">
                     <a-space :size="4" wrap>
-                      <a-tag v-if="record.supports_thinking" size="small" color="purple">thinking</a-tag>
-                      <a-tag v-if="record.is_thinking_only" size="small" color="orange">仅思考</a-tag>
-                      <a-tag v-if="record.is_vision" size="small" color="blue">视觉</a-tag>
+                      <a-tag v-if="getThinkingMode(record) === 'always'" size="small" color="orange">仅思考</a-tag>
+                      <a-tag v-else-if="getThinkingMode(record) === 'optional'" size="small" color="purple">thinking</a-tag>
+                      <a-tag v-if="hasVision(record)" size="small" color="blue">视觉</a-tag>
                       <a-tag v-if="record.extra_body" size="small" color="cyan">extra_body</a-tag>
                       <template v-if="record.tags">
                         <a-tag v-for="tag in parseTags(record.tags)" :key="tag" size="small" color="gray">{{ tag }}</a-tag>
@@ -175,10 +175,7 @@
                           <icon-loading v-else class="probe-loading-icon" />
                         </a-link>
                       </a-tooltip>
-                      <a-link @click="showProfile(record)">
-                        <a-badge v-if="record.ai_profile" :dot="true" color="blue">档案</a-badge>
-                        <span v-else style="color:#c9cdd4">档案</span>
-                      </a-link>
+                      <a-link @click="showProfile(record)" :style="record.ai_profile ? '' : 'color:#c9cdd4'">档案</a-link>
                       <a-link @click="showModelModal(group, record)">编辑</a-link>
                       <a-popconfirm content="确认删除？" @ok="deleteModel(group.id!, record.id)">
                         <a-link status="danger">删除</a-link>
@@ -297,19 +294,27 @@
           </a-col>
         </a-row>
         <a-row :gutter="16">
-          <a-col :span="8">
-            <a-form-item label="支持 thinking">
-              <a-switch v-model="modelForm.supports_thinking" />
+          <a-col :span="12">
+            <a-form-item label="思考模式">
+              <a-select v-model="modelForm.thinking_mode" style="width:100%">
+                <a-option value="none">无思考（none）</a-option>
+                <a-option value="optional">可开关（optional）</a-option>
+                <a-option value="always">常开思考（always）</a-option>
+              </a-select>
             </a-form-item>
           </a-col>
-          <a-col :span="8">
-            <a-form-item label="仅思考模型">
-              <a-switch v-model="modelForm.is_thinking_only" />
-            </a-form-item>
-          </a-col>
-          <a-col :span="8">
-            <a-form-item label="视觉模型">
-              <a-switch v-model="modelForm.is_vision" />
+          <a-col :span="12">
+            <a-form-item label="能力（capabilities）">
+              <a-select
+                v-model="modelFormCapabilities"
+                multiple
+                style="width:100%"
+                placeholder="选择能力"
+              >
+                <a-option value="text">text（文本）</a-option>
+                <a-option value="vision">vision（视觉）</a-option>
+                <a-option value="audio">audio（音频）</a-option>
+              </a-select>
             </a-form-item>
           </a-col>
         </a-row>
@@ -317,9 +322,16 @@
           <a-col :span="12">
             <a-form-item label="thinking 专用超时 s（空=不区分）">
               <a-input-number v-model="modelForm.thinking_timeout" :min="1" allow-clear placeholder="如 120" style="width:100%"
-                :disabled="!modelForm.supports_thinking && !modelForm.is_thinking_only" />
+                :disabled="modelForm.thinking_mode === 'none'" />
             </a-form-item>
           </a-col>
+          <a-col :span="12">
+            <a-form-item label="max_tokens（空=继承全局）">
+              <a-input-number v-model="modelForm.max_tokens" :min="1" allow-clear placeholder="如 8192" style="width:100%" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-row :gutter="16">
           <a-col :span="12">
             <a-form-item label="优先级（空=继承组）">
               <a-input-number v-model="modelForm.priority" :min="0" allow-clear placeholder="继承" style="width:100%" />
@@ -333,8 +345,16 @@
             </a-form-item>
           </a-col>
         </a-row>
-        <a-form-item label="tags（JSON 数组，如 [&quot;cheap&quot;,&quot;fast&quot;]）">
-          <a-input v-model="modelForm.tags" placeholder='["cheap","fast"]' allow-clear />
+        <a-form-item label="tags">
+          <a-select
+            v-model="modelFormTags"
+            multiple
+            allow-create
+            allow-clear
+            placeholder="选择或输入 tag，如 cheap、fast、coding"
+            style="width:100%"
+            :options="allTags.map(t => ({ label: t, value: t }))"
+          />
         </a-form-item>
         <a-form-item label="extra_body（JSON）">
           <a-textarea
@@ -459,12 +479,14 @@ import {
   apiAddModel, apiUpdateModel, apiDeleteModel, apiReorderModels,
   apiExport, apiImportFile, apiProbe,
   apiSuggestModel, apiApplySuggest, apiBatchSuggest,
+  apiSimulateMeta,
   type ProviderGroup, type ModelEntry, type ProbeResponse, type AiProfile,
 } from '../api'
 
 // ---------- state ----------
 const loading = ref(false)
 const groups = ref<ProviderGroup[]>([])
+const allTags = ref<string[]>([])  // 所有已存在 tag，用于候选下拉
 const expandedIds = ref<Set<number>>(new Set())
 
 const groupVisible = ref(false)
@@ -483,6 +505,30 @@ const importPath = ref('')
 const aiSuggestLoading = ref(false)
 const batchLoading = ref(false)
 
+// capabilities 多选 Select 桥接（JSON 字符串 ↔ string[]）
+const modelFormCapabilities = computed<string[]>({
+  get: () => {
+    try { return JSON.parse(modelForm.value.capabilities || '["text"]') } catch { return ['text'] }
+  },
+  set: (v: string[]) => { modelForm.value.capabilities = JSON.stringify(v) },
+})
+
+// 辅助：获取模型有效 thinking_mode（兼容旧数据）
+function getThinkingMode(record: ModelEntry): string {
+  if (record.thinking_mode) return record.thinking_mode
+  if (record.is_thinking_only) return 'always'
+  if (record.supports_thinking) return 'optional'
+  return 'none'
+}
+
+// 辅助：是否有视觉能力（兼容旧数据）
+function hasVision(record: ModelEntry): boolean {
+  if (record.capabilities) {
+    try { return JSON.parse(record.capabilities).includes('vision') } catch {}
+  }
+  return record.is_vision
+}
+
 const activeGroupVendor = computed(() => {
   if (!activeGroupId.value) return ''
   const g = groups.value.find(g => g.id === activeGroupId.value)
@@ -495,17 +541,25 @@ async function runAiSuggest() {
   try {
     const res = await apiSuggestModel(activeGroupVendor.value, modelForm.value.model)
     const s = res.data
-    // 填充表单字段（以已有值为准：已手动设置为 true 的不被 AI 覆盖为 false）
-    if (s.thinking_mode === 'always') {
-      modelForm.value.supports_thinking = true
-      modelForm.value.is_thinking_only = true
-    } else if (s.thinking_mode === 'optional') {
-      modelForm.value.supports_thinking = true
-      // optional 时不改 is_thinking_only，保留已有设置
-    } else {
-      // AI 认为不支持时，不清零已有的 true（以人工设置为准）
+    // 填充新字段（只升不降：已有更高等级的不覆盖）
+    const tmOrder: Record<string, number> = { none: 0, optional: 1, always: 2 }
+    const currentTm = modelForm.value.thinking_mode || 'none'
+    if ((tmOrder[s.thinking_mode] || 0) > (tmOrder[currentTm] || 0)) {
+      modelForm.value.thinking_mode = s.thinking_mode
     }
-    if (s.capabilities.includes('vision')) modelForm.value.is_vision = true
+    // capabilities：与已有合并
+    if (s.capabilities.includes('vision')) {
+      const existing: string[] = (() => {
+        try { return JSON.parse(modelForm.value.capabilities || '["text"]') } catch { return ['text'] }
+      })()
+      if (!existing.includes('vision')) {
+        modelForm.value.capabilities = JSON.stringify([...existing, 'vision'])
+      }
+    }
+    // 同步旧字段（保留 UI 兼容）
+    modelForm.value.supports_thinking = modelForm.value.thinking_mode === 'optional' || modelForm.value.thinking_mode === 'always'
+    modelForm.value.is_thinking_only = modelForm.value.thinking_mode === 'always'
+    modelForm.value.is_vision = hasVision({ ...modelForm.value } as any)
     // tags：与已有值合并去重（人工在前，AI 补充新标签）
     if (s.tags.length) {
       const existing: string[] = modelForm.value.tags ? JSON.parse(modelForm.value.tags) : []
@@ -569,6 +623,8 @@ async function refreshProfile() {
     // 需要同步回写的字段（AI 推断结果）
     const inferred = {
       ai_profile: JSON.stringify(d.ai_profile),
+      thinking_mode: d.thinking_mode ?? null,
+      capabilities: d.capabilities ?? null,
       supports_thinking: d.supports_thinking,
       is_thinking_only: d.is_thinking_only,
       is_vision: d.is_vision,
@@ -658,12 +714,20 @@ function emptyGroupForm() {
 function emptyModelForm() {
   return {
     model: '', weight: null as number | null, timeout: null as number | null,
-    remark: null as string | null, supports_thinking: false,
-    is_thinking_only: false, extra_body: undefined as string | undefined,
+    remark: null as string | null,
+    // 新字段
+    thinking_mode: 'none' as string,
+    capabilities: '["text"]' as string | null,
+    // 旧字段（保留兼容，由新字段驱动）
+    supports_thinking: false,
+    is_thinking_only: false,
+    is_vision: false,
+    extra_body: undefined as string | undefined,
     expires_at: null as string | null, priority: null as number | null,
-    is_vision: false, tags: null as string | null, enabled: true,
+    tags: null as string | null, enabled: true,
     thinking_timeout: null as number | null,
     ai_profile: null as string | null,
+    max_tokens: null as number | null,
   }
 }
 function maskKey(key: string) {
@@ -681,6 +745,12 @@ function parseTags(tags: string | null): string[] {
   if (!tags) return []
   try { return JSON.parse(tags) } catch { return [] }
 }
+
+// tags 多选下拉的桥接计算属性（string[] ↔ JSON string）
+const modelFormTags = computed<string[]>({
+  get: () => parseTags(modelForm.value.tags),
+  set: (v: string[]) => { modelForm.value.tags = v.length ? JSON.stringify(v) : null },
+})
 function toggleGroup(id: number) {
   if (expandedIds.value.has(id)) {
     expandedIds.value.delete(id)
@@ -702,7 +772,15 @@ async function loadGroups() {
   }
 }
 
-onMounted(loadGroups)
+onMounted(async () => {
+  loadGroups()
+  try {
+    const res = await apiSimulateMeta()
+    allTags.value = res.data.tags
+  } catch {
+    // 静默失败，候选为空时仍可手动输入
+  }
+})
 
 // ---------- group CRUD ----------
 function showGroupModal(group: ProviderGroup | null) {
@@ -737,14 +815,53 @@ async function deleteGroup(id: number) {
 function showModelModal(group: ProviderGroup, model: ModelEntry | null) {
   activeGroupId.value = group.id!
   editingModel.value = model
-  modelForm.value = model
-    ? { model: model.model, weight: model.weight, timeout: model.timeout, remark: model.remark, supports_thinking: model.supports_thinking, is_thinking_only: model.is_thinking_only, extra_body: model.extra_body ?? undefined, expires_at: model.expires_at, priority: model.priority, is_vision: model.is_vision, tags: model.tags, enabled: model.enabled, thinking_timeout: model.thinking_timeout, ai_profile: model.ai_profile }
-    : emptyModelForm()
+  if (model) {
+    // 从新字段读取，兼容旧数据（thinking_mode 可能为 null）
+    const tm = model.thinking_mode || (
+      model.is_thinking_only ? 'always' :
+      model.supports_thinking ? 'optional' : 'none'
+    )
+    const caps = model.capabilities || (model.is_vision ? '["text","vision"]' : '["text"]')
+    modelForm.value = {
+      model: model.model,
+      weight: model.weight,
+      timeout: model.timeout,
+      remark: model.remark,
+      thinking_mode: tm,
+      capabilities: caps,
+      supports_thinking: model.supports_thinking,
+      is_thinking_only: model.is_thinking_only,
+      is_vision: model.is_vision,
+      extra_body: model.extra_body ?? undefined,
+      expires_at: model.expires_at,
+      priority: model.priority,
+      tags: model.tags,
+      enabled: model.enabled,
+      thinking_timeout: model.thinking_timeout,
+      ai_profile: model.ai_profile,
+      max_tokens: model.max_tokens ?? null,
+    }
+  } else {
+    modelForm.value = emptyModelForm()
+  }
   modelVisible.value = true
 }
 async function saveModel() {
   try {
-    const payload = { ...modelForm.value, extra_body: modelForm.value.extra_body ?? null }
+    const tm = modelForm.value.thinking_mode || 'none'
+    const payload = {
+      ...modelForm.value,
+      extra_body: modelForm.value.extra_body ?? null,
+      // 新字段
+      thinking_mode: tm,
+      capabilities: modelForm.value.capabilities,
+      // 同步旧字段（服务端会读这两个字段做兼容）
+      supports_thinking: tm === 'optional' || tm === 'always',
+      is_thinking_only: tm === 'always',
+      is_vision: (() => {
+        try { return JSON.parse(modelForm.value.capabilities || '[]').includes('vision') } catch { return false }
+      })(),
+    }
     if (editingModel.value?.id) {
       await apiUpdateModel(activeGroupId.value!, editingModel.value.id, payload)
     } else {
@@ -752,6 +869,8 @@ async function saveModel() {
     }
     modelVisible.value = false
     await loadGroups()
+    // 刷新 tag 候选词
+    try { const r = await apiSimulateMeta(); allTags.value = r.data.tags } catch {}
     Message.success('保存成功')
   } catch {
     Message.error('保存失败')

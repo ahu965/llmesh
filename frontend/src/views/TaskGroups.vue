@@ -46,13 +46,15 @@
               <span v-if="tg.pinned.length === 0" class="text-muted">— 不限定（全量池）</span>
               <template v-else>
                 <span
-                  v-for="(vm, idx) in tg.pinned"
-                  :key="vm"
+                  v-for="(item, idx) in tg.pinned"
+                  :key="item.vm"
                   class="pinned-item"
-                  :title="vm"
+                  :title="item.vm"
                 >
                   <span class="pinned-index">{{ idx + 1 }}</span>
-                  <span class="pinned-vm">{{ vm }}</span>
+                  <span class="pinned-vm">{{ item.vm }}</span>
+                  <a-tag v-if="item.thinking === true" size="small" color="purple" style="margin-left:2px">thinking↑</a-tag>
+                  <a-tag v-else-if="item.thinking === false" size="small" color="orange" style="margin-left:2px">thinking↓</a-tag>
                 </span>
                 <span class="pinned-fallback">→ 全部失败后 fallback 全量池</span>
               </template>
@@ -82,6 +84,10 @@
             <span class="param-label">备注</span>
             <span class="text-muted">{{ tg.remark }}</span>
           </div>
+          <div v-if="tg.max_tokens" class="param-row">
+            <span class="param-label">max_tokens</span>
+            <a-tag size="small" color="arcoblue">{{ tg.max_tokens }}</a-tag>
+          </div>
         </div>
       </div>
     </div>
@@ -90,7 +96,7 @@
     <a-drawer
       :visible="drawerVisible"
       :title="editingId ? '编辑任务组' : '新建任务组'"
-      :width="560"
+      :width="720"
       @cancel="drawerVisible = false"
       @ok="saveGroup"
       :ok-loading="saving"
@@ -115,13 +121,21 @@
             >
               <span class="pinned-editor-idx">{{ idx + 1 }}</span>
               <a-select
-                v-model="form.pinned![idx]"
+                v-model="form.pinned![idx].vm"
                 :options="modelOptions"
                 placeholder="选择模型"
                 allow-search
                 style="flex:1"
-                @change="(v: string) => form.pinned![idx] = v"
               />
+              <a-select
+                v-model="form.pinned![idx].thinking"
+                style="width:110px;flex-shrink:0"
+                :title="`该模型 thinking 覆盖（None=继承任务组全局 thinking）`"
+              >
+                <a-option :value="null">继承</a-option>
+                <a-option :value="true">开启↑</a-option>
+                <a-option :value="false">关闭↓</a-option>
+              </a-select>
               <a-button
                 shape="circle"
                 size="mini"
@@ -140,7 +154,7 @@
               添加模型
             </a-button>
           </div>
-          <div class="field-hint">按序尝试，全部失败后自动 fallback 全量池；不填则完全走全量池</div>
+          <div class="field-hint">按序尝试，全部失败后自动 fallback 全量池；thinking 可对每个模型单独覆盖（继承=沿用任务组全局设置）</div>
         </a-form-item>
 
         <a-form-item label="偏好厂商/模型（prefer，软偏好）">
@@ -185,6 +199,11 @@
             <a-option :value="true">True（开启思考）</a-option>
             <a-option :value="false">False（关闭思考）</a-option>
           </a-select>
+        </a-form-item>
+
+        <a-form-item label="max_tokens（空=继承全局）">
+          <a-input-number v-model="form.max_tokens" :min="1" allow-clear placeholder="如 16384，空=沿用全局设置" style="width:240px" />
+          <div class="field-hint">任务组级覆盖：优先级低于模型级，高于全局；适用于需要长输出的场景（如代码生成、长文总结）</div>
         </a-form-item>
 
         <a-form-item label="备注">
@@ -268,6 +287,7 @@ const emptyForm = (): TaskGroupWrite & { id?: number } => ({
   thinking: null,
   remark: '',
   enabled: true,
+  max_tokens: null,
 })
 
 const form = ref<TaskGroupWrite & { id?: number }>(emptyForm())
@@ -289,13 +309,14 @@ function openEdit(tg: TaskGroupRead) {
   form.value = {
     name: tg.name,
     display_name: tg.display_name ?? '',
-    pinned: [...tg.pinned],
+    pinned: tg.pinned.map(p => ({ vm: p.vm, thinking: p.thinking })),
     exclude_tags: [...tg.exclude_tags],
     tags: [...tg.tags],
     prefer: [...tg.prefer],
     thinking: tg.thinking,
     remark: tg.remark ?? '',
     enabled: tg.enabled,
+    max_tokens: tg.max_tokens ?? null,
   }
   drawerVisible.value = true
 }
@@ -310,13 +331,14 @@ async function saveGroup() {
   const payload: TaskGroupWrite = {
     name: form.value.name.trim(),
     display_name: form.value.display_name || null,
-    pinned: (form.value.pinned ?? []).filter(v => v),
+    pinned: (form.value.pinned ?? []).filter(p => p.vm),
     exclude_tags: form.value.exclude_tags,
     tags: form.value.tags,
     prefer: form.value.prefer,
     thinking: form.value.thinking,
     remark: form.value.remark || null,
     enabled: form.value.enabled,
+    max_tokens: form.value.max_tokens ?? null,
   }
   try {
     if (editingId.value) {
@@ -347,7 +369,7 @@ async function deleteGroup(id: number) {
 
 // ---- pinned 编辑 ----
 function addPinned() {
-  form.value.pinned!.push('')
+  form.value.pinned!.push({ vm: '', thinking: null })
 }
 function removePinned(idx: number) {
   form.value.pinned!.splice(idx, 1)

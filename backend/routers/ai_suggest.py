@@ -192,40 +192,62 @@ def _apply_inferred_fields(
     """
     model_name = entry.model or ""
 
-    # ---- thinking ----
+    # ---- thinking_mode ----
     # 双重校验：AI thinking_mode 非 none + 模型名命中白名单，才认为应开启
     ai_wants_thinking = (
         parsed.thinking_mode in ("always", "optional")
         and _model_matches_keywords(model_name, _THINKING_KEYWORDS)
     )
-    ai_wants_only = ai_wants_thinking and parsed.thinking_mode == "always"
+    ai_thinking_mode = parsed.thinking_mode if ai_wants_thinking else "none"
 
     if force:
-        # 强制模式：完全由 AI + 白名单决定
-        entry.supports_thinking = ai_wants_thinking
-        entry.is_thinking_only = ai_wants_only
+        entry.thinking_mode = ai_thinking_mode
+        # 同步旧布尔字段
+        entry.supports_thinking = ai_thinking_mode in ("optional", "always")
+        entry.is_thinking_only = ai_thinking_mode == "always"
     else:
-        # 保留模式：已有 True 则不降级；AI 认为应开启才往上写
-        if ai_wants_thinking:
-            entry.supports_thinking = True
-            if ai_wants_only:
+        # 保留模式：已有非 none 则不降级；AI 认为应开启才往上写
+        current_tm = entry.thinking_mode or (
+            "always" if entry.is_thinking_only else
+            "optional" if entry.supports_thinking else "none"
+        )
+        # 只升不降：none→optional/always，或 optional→always
+        _tm_order = {"none": 0, "optional": 1, "always": 2}
+        if _tm_order.get(ai_thinking_mode, 0) > _tm_order.get(current_tm, 0):
+            entry.thinking_mode = ai_thinking_mode
+            entry.supports_thinking = ai_thinking_mode in ("optional", "always")
+            if ai_thinking_mode == "always":
                 entry.is_thinking_only = True
-            # optional 时不改 is_thinking_only，保留人工设置
-        # AI 认为不支持时：不主动清零已有的 True（以人工设置为准）
+        elif current_tm == "none" and entry.thinking_mode is None:
+            # 初次设置（旧数据还没 thinking_mode 字段值）
+            entry.thinking_mode = "none"
 
-    # ---- vision ----
+    # ---- capabilities ----
     ai_wants_vision = (
         "vision" in parsed.capabilities
         and _model_matches_keywords(model_name, _VISION_KEYWORDS)
     )
+    ai_caps = ["text", "vision"] if ai_wants_vision else ["text"]
 
     if force:
+        entry.capabilities = json.dumps(ai_caps, ensure_ascii=False)
         entry.is_vision = ai_wants_vision
     else:
-        # 保留模式：已有 True 则不降级
+        # 保留模式：已有 vision 则不降级
+        current_caps: list = []
+        if entry.capabilities:
+            try:
+                current_caps = json.loads(entry.capabilities)
+            except Exception:
+                pass
+        if not current_caps:
+            current_caps = ["text", "vision"] if entry.is_vision else ["text"]
+
+        if ai_wants_vision and "vision" not in current_caps:
+            current_caps = list(dict.fromkeys(current_caps + ["vision"]))
+        entry.capabilities = json.dumps(current_caps, ensure_ascii=False)
         if ai_wants_vision:
             entry.is_vision = True
-        # AI 认为不支持时：不主动清零
 
     # ---- tags：合并去重（人工 + AI 取并集） ----
     if parsed.tags:
@@ -269,6 +291,8 @@ def apply_suggest_to_model(model_id: int, session: Session = Depends(get_session
     return {
         "ok": True,
         "ai_profile": parsed.ai_profile,
+        "thinking_mode": entry.thinking_mode,
+        "capabilities": entry.capabilities,
         "supports_thinking": entry.supports_thinking,
         "is_thinking_only": entry.is_thinking_only,
         "is_vision": entry.is_vision,

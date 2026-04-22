@@ -8,6 +8,22 @@
       </div>
       <div class="param-body">
         <a-form layout="inline" :model="form" class="param-form">
+          <a-form-item label="task_group">
+            <a-select
+              v-model="form.task_group"
+              allow-clear
+              placeholder="不限（全量池）"
+              style="width:200px"
+            >
+              <a-option :value="null">—— 不指定任务组 ——</a-option>
+              <a-option
+                v-for="tg in meta.task_groups"
+                :key="tg.name"
+                :value="tg.name"
+              >{{ tg.display_name ? `${tg.name}（${tg.display_name}）` : tg.name }}</a-option>
+            </a-select>
+          </a-form-item>
+
           <a-form-item label="prefer">
             <a-select
               v-model="form.prefer"
@@ -101,7 +117,49 @@
       </div>
 
       <!-- 空状态 -->
-      <a-empty v-if="result.layers.length === 0" description="当前参数下无可用模型" style="margin-top:40px" />
+      <a-empty v-if="result.layers.length === 0 && result.pinned_models.length === 0" description="当前参数下无可用模型" style="margin-top:40px" />
+
+      <!-- pinned 阶段（任务组有 pinned 配置时展示）-->
+      <div v-if="result.pinned_models.length > 0" class="layer-block">
+        <div class="layer-header layer-pinned">
+          <span class="layer-badge">📌 PINNED</span>
+          <span class="layer-label">固定候选列表（按序尝试，全部失败后 fallback 到下方分层池）</span>
+          <span class="layer-count">{{ result.pinned_models.length }} 个模型</span>
+        </div>
+        <div class="model-list">
+          <div class="model-row model-header">
+            <span class="mc-order">顺序</span>
+            <span class="mc-vendor">厂商</span>
+            <span class="mc-model">模型名</span>
+            <span class="mc-tags">特性 / tags</span>
+            <span class="mc-remark">备注</span>
+          </div>
+          <div
+            v-for="p in result.pinned_models"
+            :key="p.order"
+            class="model-row"
+            :class="{ 'row-not-in-pool': !p.in_pool }"
+          >
+            <span class="mc-order pinned-order">{{ p.order }}</span>
+            <span class="mc-vendor vendor-text">{{ p.vendor }}</span>
+            <span class="mc-model model-text">
+              {{ p.model }}
+              <a-tag v-if="!p.in_pool" size="small" color="red" style="margin-left:4px">不在池中</a-tag>
+              <a-tag v-if="p.thinking_override === true" size="small" color="purple" style="margin-left:4px">thinking=true</a-tag>
+              <a-tag v-else-if="p.thinking_override === false" size="small" color="gray" style="margin-left:4px">thinking=false</a-tag>
+            </span>
+            <span class="mc-tags">
+              <a-space :size="4" wrap>
+                <a-tag v-if="p.thinking_mode === 'always'" size="small" color="orange">仅思考</a-tag>
+                <a-tag v-else-if="p.thinking_mode === 'optional'" size="small" color="purple">thinking</a-tag>
+                <a-tag v-if="p.capabilities?.includes('vision')" size="small" color="blue">视觉</a-tag>
+                <a-tag v-for="t in p.tags" :key="t" size="small" color="gray">{{ t }}</a-tag>
+              </a-space>
+            </span>
+            <span class="mc-remark text-muted">{{ p.remark || p.group_remark || '—' }}</span>
+          </div>
+        </div>
+      </div>
 
       <!-- 分层展示 -->
       <div v-for="layer in result.layers" :key="layer.priority" class="layer-block">
@@ -155,9 +213,9 @@
             </span>
             <span class="mc-tags">
               <a-space :size="4" wrap>
-                <a-tag v-if="m.supports_thinking" size="small" color="purple">thinking</a-tag>
-                <a-tag v-if="m.is_thinking_only" size="small" color="orange">仅思考</a-tag>
-                <a-tag v-if="m.is_vision" size="small" color="blue">视觉</a-tag>
+                <a-tag v-if="m.thinking_mode === 'always'" size="small" color="orange">仅思考</a-tag>
+                <a-tag v-else-if="m.thinking_mode === 'optional' || m.supports_thinking" size="small" color="purple">thinking</a-tag>
+                <a-tag v-if="m.capabilities?.includes('vision') || m.is_vision" size="small" color="blue">视觉</a-tag>
                 <a-tag v-for="t in m.tags" :key="t" size="small" color="gray">{{ t }}</a-tag>
               </a-space>
             </span>
@@ -183,7 +241,7 @@ import { apiSimulate, apiSimulateMeta, type SimulateResponse, type SimulateLayer
 const loading = ref(false)
 const result = ref<SimulateResponse | null>(null)
 
-const meta = ref({ tags: [] as string[], vendors: [] as string[] })
+const meta = ref({ tags: [] as string[], vendors: [] as string[], task_groups: [] as { name: string; display_name: string | null }[] })
 
 onMounted(async () => {
   try {
@@ -200,10 +258,11 @@ const form = ref({
   vision: null as boolean | null,
   tags: [] as string[],
   exclude_tags: [] as string[],
+  task_group: null as string | null,
 })
 
 function reset() {
-  form.value = { prefer: [], thinking: null, vision: null, tags: [], exclude_tags: [] }
+  form.value = { prefer: [], thinking: null, vision: null, tags: [], exclude_tags: [], task_group: null }
   result.value = null
 }
 
@@ -218,6 +277,7 @@ async function run() {
       vision: toTriBool(form.value.vision),
       tags: form.value.tags.length ? form.value.tags.join(',') : null,
       exclude_tags: form.value.exclude_tags.length ? form.value.exclude_tags.join(',') : null,
+      task_group: form.value.task_group || null,
     })
     result.value = res.data
   } catch {
@@ -233,6 +293,7 @@ function hasActiveFilter(layer: SimulateLayer): boolean {
 
 const codeHint = computed(() => {
   const parts: string[] = []
+  if (form.value.task_group) parts.push(`task_group="${form.value.task_group}"`)
   if (form.value.prefer.length) parts.push(`prefer="${form.value.prefer.join(',')}"`)
   if (form.value.thinking !== null) parts.push(`thinking=${form.value.thinking}`)
   if (form.value.vision !== null) parts.push(`vision=${form.value.vision}`)
@@ -357,6 +418,10 @@ run()
   background: linear-gradient(90deg, #fff7e6 0%, #f7f8fa 60%);
   border-left: 4px solid #ff7d00;
 }
+.layer-pinned {
+  background: linear-gradient(90deg, #f0f0fe 0%, #f7f8fa 60%);
+  border-left: 4px solid #7b61ff;
+}
 .layer-badge {
   font-weight: 700;
   font-size: 12px;
@@ -397,9 +462,16 @@ run()
 .row-prefer  { background: #f0f9ff; }
 .row-tags    { background: #f6ffed; }
 .row-inactive { opacity: 0.45; }
+.row-not-in-pool { opacity: 0.4; }
 .model-row:not(.model-header):hover { background: #f7f8fa; }
 
+.pinned-order {
+  font-weight: 700;
+  color: #7b61ff;
+}
+
 /* 列宽 */
+.mc-order  { width: 50px; flex-shrink: 0; text-align: center; }
 .mc-vendor  { width: 100px; flex-shrink: 0; }
 .mc-model   { flex: 2; min-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mc-weight  { width: 60px; flex-shrink: 0; text-align: center; }

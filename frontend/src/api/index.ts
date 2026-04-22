@@ -13,16 +13,21 @@ export interface ModelEntry {
   weight: number | null
   timeout: number | null
   remark: string | null
+  // 旧字段（兼容保留）
   supports_thinking: boolean
   is_thinking_only: boolean
+  is_vision: boolean
+  // 新字段（#7 重构）
+  thinking_mode: string | null       // "none" | "optional" | "always" | null（旧数据迁移前）
+  capabilities: string | null        // JSON 数组字符串，如 '["text","vision"]'
   extra_body: string | null
   expires_at: string | null
   priority: number | null
-  is_vision: boolean
   tags: string | null
   enabled: boolean
   thinking_timeout: number | null
   ai_profile: string | null
+  max_tokens: number | null          // 模型级 max_tokens 覆盖，null=继承全局
 }
 
 export interface ProviderGroup {
@@ -104,6 +109,7 @@ export interface SimulateRequest {
   vision?: boolean | null
   tags?: string | null
   exclude_tags?: string | null
+  task_group?: string | null
 }
 
 export interface SimulateModelItem {
@@ -115,6 +121,9 @@ export interface SimulateModelItem {
   weight_pct: number
   is_prefer_hit: boolean
   is_tags_hit: boolean
+  thinking_mode: string             // "none" / "optional" / "always"
+  capabilities: string[]            // ["text"] / ["text","vision"] 等
+  // 兼容旧字段
   supports_thinking: boolean
   is_thinking_only: boolean
   is_vision: boolean
@@ -129,16 +138,31 @@ export interface SimulateLayer {
   models: SimulateModelItem[]
 }
 
+export interface PinnedSimulateItem {
+  order: number
+  vendor: string
+  model: string
+  in_pool: boolean
+  thinking_override: boolean | null
+  thinking_mode: string
+  capabilities: string[]
+  tags: string[]
+  remark: string | null
+  group_remark: string | null
+}
+
 export interface SimulateResponse {
   layers: SimulateLayer[]
   disabled_count: number
   filtered_out_count: number
   filter_reason: string
+  pinned_models: PinnedSimulateItem[]
 }
 
 export interface SimulateMeta {
   tags: string[]
   vendors: string[]
+  task_groups: { name: string; display_name: string | null }[]
 }
 
 export const apiSimulateMeta = () => http.get<SimulateMeta>('/api/simulate/meta')
@@ -147,29 +171,36 @@ export const apiSimulate = (body: SimulateRequest) =>
   http.post<SimulateResponse>('/api/simulate', body)
 
 // ---------- Task Groups ----------
+export interface PinnedItem {
+  vm: string                  // "vendor/model"
+  thinking: boolean | null    // null=继承任务组全局，true/false=覆盖
+}
+
 export interface TaskGroupWrite {
   name: string
   display_name?: string | null
-  pinned?: string[]
+  pinned?: PinnedItem[]
   exclude_tags?: string[]
   tags?: string[]
   prefer?: string[]
   thinking?: boolean | null
   remark?: string | null
   enabled: boolean
+  max_tokens?: number | null         // 任务组级 max_tokens 覆盖，null=继承全局
 }
 
 export interface TaskGroupRead {
   id: number
   name: string
   display_name: string | null
-  pinned: string[]
+  pinned: PinnedItem[]
   exclude_tags: string[]
   tags: string[]
   prefer: string[]
   thinking: boolean | null
   remark: string | null
   enabled: boolean
+  max_tokens: number | null          // 任务组级 max_tokens 覆盖，null=继承全局
 }
 
 export const apiListTaskGroups = () => http.get<TaskGroupRead[]>('/api/task-groups')

@@ -59,16 +59,25 @@ class ModelEntry(SQLModel, table=True):
     weight: Optional[int] = Field(default=None)    # None = 继承 group.weight
     timeout: Optional[int] = Field(default=None)   # None = 继承 group.timeout
     remark: Optional[str] = Field(default=None)
+    # 旧字段（保留兼容，供迁移读取；新代码使用 thinking_mode / capabilities）
     supports_thinking: bool = Field(default=False)
     is_thinking_only: bool = Field(default=False)
+    is_vision: bool = Field(default=False)
+    # 新字段（#7 重构）
+    thinking_mode: Optional[str] = Field(default=None)
+    # "none"     = 不支持思考（原 supports_thinking=False）
+    # "optional" = 可开可关（原 supports_thinking=True, is_thinking_only=False）
+    # "always"   = 常开思考（原 supports_thinking=True, is_thinking_only=True）
+    capabilities: Optional[str] = Field(default=None)
+    # JSON 数组，如 '["text","vision"]'；None 表示未设置（默认纯文本）
     extra_body: Optional[str] = Field(default=None)  # JSON 字符串存储
     expires_at: Optional[str] = Field(default=None)   # ISO 日期字符串，None=继承组的过期时间
     priority: Optional[int] = Field(default=None)     # 分层路由优先级，None=继承组的 priority
-    is_vision: bool = Field(default=False)             # 视觉模型标记，硬过滤
     tags: Optional[str] = Field(default=None)          # JSON 数组字符串，如 '["cheap","fast"]'
     enabled: bool = Field(default=True)
     thinking_timeout: Optional[int] = Field(default=None)  # thinking 模式专用超时，None=不单独设置
     ai_profile: Optional[str] = Field(default=None)        # AI 生成的结构化模型档案（JSON 字符串）
+    max_tokens: Optional[int] = Field(default=None)        # 模型级 max_tokens 覆盖，None=继承全局
 
     def get_extra_body(self) -> Optional[Dict[str, Any]]:
         if self.extra_body:
@@ -94,6 +103,7 @@ class TaskGroup(SQLModel, table=True):
     thinking: Optional[int] = Field(default=None)      # NULL=None, 0=False, 1=True
     remark: Optional[str] = Field(default=None)
     enabled: bool = Field(default=True)
+    max_tokens: Optional[int] = Field(default=None)    # 任务组级 max_tokens 覆盖，None=继承全局；优先级低于模型级
 
     def get_pinned(self) -> List[str]:
         if self.pinned:

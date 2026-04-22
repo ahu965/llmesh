@@ -55,17 +55,38 @@ def _build_model_entry(entry: ModelEntry, group: ProviderGroup) -> dict | str:
         base_tags = base_tags + [group.billing_mode]
     effective_tags = base_tags if base_tags else None
 
+    # 读取新字段（优先），兼容旧布尔字段
+    thinking_mode = entry.thinking_mode  # "none" / "optional" / "always" / None（旧数据）
+    if thinking_mode is None:
+        # 旧数据兼容：从布尔字段推导
+        if entry.supports_thinking and entry.is_thinking_only:
+            thinking_mode = "always"
+        elif entry.supports_thinking:
+            thinking_mode = "optional"
+        else:
+            thinking_mode = "none"
+
+    capabilities: list | None = None
+    if entry.capabilities:
+        try:
+            capabilities = _json.loads(entry.capabilities)
+        except Exception:
+            pass
+    if capabilities is None:
+        # 旧数据兼容
+        capabilities = ["text", "vision"] if entry.is_vision else ["text"]
+
     has_overrides = any([
         entry.weight is not None and entry.weight != group.weight,
         entry.timeout is not None and entry.timeout != group.timeout,
         entry.remark,
-        entry.supports_thinking,
-        entry.is_thinking_only,
-        entry.is_vision,
+        thinking_mode != "none",
+        "vision" in capabilities,
         effective_tags,
         extra_body,
         effective_priority != 0,
         entry.thinking_timeout is not None,
+        entry.max_tokens is not None,
     ])
     if not has_overrides:
         return entry.model
@@ -76,12 +97,10 @@ def _build_model_entry(entry: ModelEntry, group: ProviderGroup) -> dict | str:
         d["timeout"] = entry.timeout
     if entry.remark:
         d["remark"] = entry.remark
-    if entry.supports_thinking:
-        d["supports_thinking"] = True
-    if entry.is_thinking_only:
-        d["is_thinking_only"] = True
-    if entry.is_vision:
-        d["is_vision"] = True
+    if thinking_mode != "none":
+        d["thinking_mode"] = thinking_mode
+    if "vision" in capabilities:
+        d["capabilities"] = capabilities
     if effective_tags:
         d["tags"] = effective_tags
     if effective_priority != 0:
@@ -90,6 +109,8 @@ def _build_model_entry(entry: ModelEntry, group: ProviderGroup) -> dict | str:
         d["extra_body"] = extra_body
     if entry.thinking_timeout is not None:
         d["thinking_timeout"] = entry.thinking_timeout
+    if entry.max_tokens is not None:
+        d["max_tokens"] = entry.max_tokens
     return d
 
 
@@ -142,7 +163,19 @@ def export_secrets(session: Session, output_path: Optional[str | Path] = None) -
             entry["display_name"] = tg.display_name
         pinned = tg.get_pinned()
         if pinned:
-            entry["pinned"] = pinned
+            # thinking=None 的项简化为字符串（兼容旧格式），有覆盖的保留 dict
+            pinned_export = []
+            for item in pinned:
+                if isinstance(item, str):
+                    pinned_export.append(item)
+                elif isinstance(item, dict):
+                    if item.get("thinking") is None:
+                        pinned_export.append(item.get("vm", item))
+                    else:
+                        pinned_export.append({"vm": item["vm"], "thinking": item["thinking"]})
+                else:
+                    pinned_export.append(item)
+            entry["pinned"] = pinned_export
         exc_tags = tg.get_exclude_tags()
         if exc_tags:
             entry["exclude_tags"] = exc_tags
@@ -157,6 +190,8 @@ def export_secrets(session: Session, output_path: Optional[str | Path] = None) -
             entry["thinking"] = thinking
         if tg.remark:
             entry["remark"] = tg.remark
+        if tg.max_tokens is not None:
+            entry["max_tokens"] = tg.max_tokens
         task_groups_raw.append(entry)
 
     if gs.default_thinking_timeout is not None:

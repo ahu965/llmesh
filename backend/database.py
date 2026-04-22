@@ -59,6 +59,9 @@ def _migrate_db():
         ("modelentry",     "tags",               "TEXT"),
         ("modelentry",     "thinking_timeout",   "INTEGER"),
         ("modelentry",     "ai_profile",         "TEXT"),
+        ("modelentry",     "thinking_mode",      "TEXT"),
+        ("modelentry",     "capabilities",       "TEXT"),
+        ("modelentry",     "max_tokens",         "INTEGER"),
         ("providergroup",  "priority",       "INTEGER"),
         ("providergroup",  "alias",          "TEXT"),
         ("providergroup",  "website",        "TEXT"),
@@ -70,6 +73,7 @@ def _migrate_db():
         ("taskgroup",      "thinking",       "INTEGER"),
         ("taskgroup",      "remark",         "TEXT"),
         ("taskgroup",      "enabled",        "INTEGER"),
+        ("taskgroup",      "max_tokens",     "INTEGER"),
     ]
     with engine.connect() as conn:
         for table, col, col_type in new_columns:
@@ -84,6 +88,34 @@ def _migrate_db():
                         f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"
                     )
                 )
+        conn.commit()
+
+    # ---- 数据迁移：旧布尔字段 → thinking_mode / capabilities ----
+    # 仅对 thinking_mode IS NULL 的行执行，已迁移的不重复覆盖
+    with engine.connect() as conn:
+        import sqlalchemy
+        # thinking_mode 迁移
+        conn.execute(sqlalchemy.text(
+            "UPDATE modelentry SET thinking_mode = 'always' "
+            "WHERE thinking_mode IS NULL AND supports_thinking = 1 AND is_thinking_only = 1"
+        ))
+        conn.execute(sqlalchemy.text(
+            "UPDATE modelentry SET thinking_mode = 'optional' "
+            "WHERE thinking_mode IS NULL AND supports_thinking = 1 AND is_thinking_only = 0"
+        ))
+        conn.execute(sqlalchemy.text(
+            "UPDATE modelentry SET thinking_mode = 'none' "
+            "WHERE thinking_mode IS NULL AND supports_thinking = 0"
+        ))
+        # capabilities 迁移
+        conn.execute(sqlalchemy.text(
+            "UPDATE modelentry SET capabilities = '[\"text\",\"vision\"]' "
+            "WHERE capabilities IS NULL AND is_vision = 1"
+        ))
+        conn.execute(sqlalchemy.text(
+            "UPDATE modelentry SET capabilities = '[\"text\"]' "
+            "WHERE capabilities IS NULL AND is_vision = 0"
+        ))
         conn.commit()
 
 

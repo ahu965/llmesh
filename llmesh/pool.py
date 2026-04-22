@@ -178,9 +178,16 @@ class MultiVendorLLMPool:
     # ==================== LLM 实例缓存 ====================
 
     def _get_llm(self, model_config: Dict, temperature: float, timeout: int,
-                 thinking: Optional[bool] = None) -> ChatOpenAI:
+                 thinking: Optional[bool] = None,
+                 tg_max_tokens: Optional[int] = None) -> ChatOpenAI:
         model_key = f"{model_config['vendor']}_{model_config['model']}"
-        cache_key = (model_key, temperature, timeout, thinking)
+        # max_tokens 优先级：模型级 > 任务组级 > 全局
+        effective_max_tokens = (
+            model_config.get("max_tokens")
+            or tg_max_tokens
+            or self._default_max_tokens
+        )
+        cache_key = (model_key, temperature, timeout, thinking, effective_max_tokens)
         with self._lock:
             if cache_key not in self._llm_cache:
                 kwargs: Dict = dict(
@@ -188,17 +195,21 @@ class MultiVendorLLMPool:
                     api_key=model_config["api_key"],
                     base_url=model_config["base_url"],
                     temperature=temperature,
-                    max_tokens=self._default_max_tokens,
+                    max_tokens=effective_max_tokens,
                     max_retries=self._default_max_retries,
                     timeout=timeout,
                     streaming=True,   # 兼容仅支持流式的模型（如 qwen3 开启 thinking 时）
                 )
                 extra_body = dict(model_config.get("extra_body") or {})
-                if thinking is True and model_config.get("supports_thinking"):
+                tm = model_config.get("thinking_mode") or (
+                    "always" if model_config.get("is_thinking_only") else
+                    "optional" if model_config.get("supports_thinking") else "none"
+                )
+                if thinking is True and tm in ("optional", "always"):
                     # thinking=True：只对支持思考的模型开启
                     extra_body["enable_thinking"] = True
-                elif thinking is False and not model_config.get("is_thinking_only"):
-                    # thinking=False：排除常开思考模型（is_thinking_only），它们只允许 enable_thinking=True
+                elif thinking is False and tm != "always":
+                    # thinking=False：排除常开思考模型（always），其余可关闭
                     extra_body["enable_thinking"] = False
                 if extra_body:
                     kwargs["extra_body"] = extra_body
@@ -255,24 +266,28 @@ class MultiVendorLLMPool:
             return None
 
         # --- thinking 硬过滤 ---
-        # thinking=True：只保留支持思考模式的模型
+        # thinking=True：只保留支持思考模式的模型（optional 或 always）
         if thinking is True:
-            available = [m for m in available if m.get("supports_thinking")]
+            available = [m for m in available if m.get("thinking_mode") in ("optional", "always")
+                         or m.get("supports_thinking")]  # 兼容旧格式
             if not available:
                 return None
-        # thinking=False：排除纯思考模型（is_thinking_only=True），其余模型均可用
+        # thinking=False：排除纯思考模型（always），其余模型均可用
         if thinking is False:
-            available = [m for m in available if not m.get("is_thinking_only")]
+            available = [m for m in available if m.get("thinking_mode") != "always"
+                         and not m.get("is_thinking_only")]  # 兼容旧格式
             if not available:
                 return None
 
         # --- vision 硬过滤 ---
         if vision is True:
-            available = [m for m in available if m.get("is_vision")]
+            available = [m for m in available if "vision" in (m.get("capabilities") or [])
+                         or m.get("is_vision")]  # 兼容旧格式
             if not available:
                 return None
         else:
-            available = [m for m in available if not m.get("is_vision")]
+            available = [m for m in available if "vision" not in (m.get("capabilities") or [])
+                         and not m.get("is_vision")]  # 兼容旧格式
             if not available:
                 return None
 
@@ -379,7 +394,7 @@ class MultiVendorLLMPool:
             pinned:        固定候选列表（"vendor/model" 格式，按序尝试），全部失败后
                            fallback 到全量池选模型逻辑
             task_group:    任务组名称（secrets.py 中 TASK_GROUPS 定义），
-                           自动展开为对应的 pinned/exclude_tags/tags/thinking，
+                           自动展开为对应的 pinned/exclude_tags/tags/thinking/max_tokens，
                            与显式参数合并（显式参数优先）
 
         Returns:
@@ -389,6 +404,7 @@ class MultiVendorLLMPool:
             RuntimeError: 所有模型均不可用
         """
         # ---------- task_group 展开（显式参数优先覆盖） ----------
+        tg_max_tokens: Optional[int] = None  # 任务组级 max_tokens（传递给 _get_llm）
         if task_group:
             from llmesh.config import get_task_group
             tg = get_task_group(task_group)
@@ -396,6 +412,7 @@ class MultiVendorLLMPool:
                 logger.warning(f"[task_group] '{task_group}' 不存在于 TASK_GROUPS，忽略")
             else:
                 if pinned is None and tg.get("pinned"):
+                    # tg["pinned"] 已是 List[{"vm", "thinking"}] 格式
                     pinned = tg["pinned"]
                 if exclude_tags is None and tg.get("exclude_tags"):
                     exclude_tags = tg["exclude_tags"]
@@ -405,9 +422,10 @@ class MultiVendorLLMPool:
                     prefer = tg["prefer"]
                 if thinking is None and tg.get("thinking") is not None:
                     thinking = tg["thinking"]
+                tg_max_tokens = tg.get("max_tokens")  # 任务组级 max_tokens
                 logger.debug(f"[task_group] '{task_group}' 展开：pinned={pinned}, "
                              f"prefer={prefer}, exclude_tags={exclude_tags}, "
-                             f"tags={tags}, thinking={thinking}")
+                             f"tags={tags}, thinking={thinking}, max_tokens={tg_max_tokens}")
 
         temp = temperature if temperature is not None else self._default_temperature
         prefer_list: List[str] = (
@@ -424,7 +442,15 @@ class MultiVendorLLMPool:
         # ---------- pinned 阶段：按序尝试固定候选列表 ----------
         if pinned:
             pinned_exhausted: Set[str] = set()
-            for vm in pinned:
+            for pinned_item in pinned:
+                # 兼容字符串（旧格式）和 dict（新格式 {"vm": ..., "thinking": ...}）
+                if isinstance(pinned_item, dict):
+                    vm = pinned_item.get("vm", "")
+                    item_thinking = pinned_item.get("thinking")   # None = 继承任务组全局
+                    effective_thinking = item_thinking if item_thinking is not None else thinking
+                else:
+                    vm = pinned_item
+                    effective_thinking = thinking
                 model_key = vm.replace("/", "_", 1)
                 if model_key in skip_keys:
                     pinned_exhausted.add(model_key)
@@ -439,16 +465,21 @@ class MultiVendorLLMPool:
                     continue
 
                 vendor_model = vm
-                if thinking is True and model_config.get("thinking_timeout"):
+                _tm = model_config.get("thinking_mode") or (
+                    "always" if model_config.get("is_thinking_only") else
+                    "optional" if model_config.get("supports_thinking") else "none"
+                )
+                if effective_thinking is True and model_config.get("thinking_timeout"):
                     base_timeout = model_config["thinking_timeout"]
-                elif model_config.get("is_thinking_only") and model_config.get("thinking_timeout"):
+                elif _tm == "always" and model_config.get("thinking_timeout"):
                     base_timeout = model_config["thinking_timeout"]
                 else:
                     base_timeout = model_config.get("timeout", 20)
 
                 for retry in range(self._timeout_retries):
                     timeout = base_timeout + self._timeout_step * retry
-                    llm = self._get_llm(model_config, temp, timeout, thinking=thinking)
+                    llm = self._get_llm(model_config, temp, timeout, thinking=effective_thinking,
+                                        tg_max_tokens=tg_max_tokens)
                     t0 = time.time()
                     try:
                         result = llm.invoke(messages)
@@ -519,16 +550,21 @@ class MultiVendorLLMPool:
             vendor_model = f"{model_config['vendor']}/{model_config['model']}"
             model_key    = f"{model_config['vendor']}_{model_config['model']}"
             # thinking 开启时优先使用 thinking_timeout，未设置则 fallback 到普通 timeout
+            _tm2 = model_config.get("thinking_mode") or (
+                "always" if model_config.get("is_thinking_only") else
+                "optional" if model_config.get("supports_thinking") else "none"
+            )
             if thinking is True and model_config.get("thinking_timeout"):
                 base_timeout = model_config["thinking_timeout"]
-            elif model_config.get("is_thinking_only") and model_config.get("thinking_timeout"):
+            elif _tm2 == "always" and model_config.get("thinking_timeout"):
                 base_timeout = model_config["thinking_timeout"]
             else:
                 base_timeout = model_config.get("timeout", 20)
 
             for retry in range(self._timeout_retries):
                 timeout = base_timeout + self._timeout_step * retry
-                llm = self._get_llm(model_config, temp, timeout, thinking=thinking)
+                llm = self._get_llm(model_config, temp, timeout, thinking=thinking,
+                                    tg_max_tokens=tg_max_tokens)
                 t0 = time.time()
                 try:
                     result = llm.invoke(messages)
