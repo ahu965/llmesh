@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from backend.database import get_session
 from backend.models.config import ProviderGroup, ModelEntry
 from backend.core.db_utils import touch_db
+from backend.core.pool_sync import reload_pool
 
 router = APIRouter(prefix="/api/providers", tags=["providers"])
 
@@ -138,6 +139,7 @@ def create_provider(data: ProviderGroupWrite, session: Session = Depends(get_ses
     session.commit()
     session.refresh(group)
     touch_db(session)
+    reload_pool(session)
     item = ProviderGroupRead.model_validate(group)
     item.models = []
     return item
@@ -154,6 +156,7 @@ def update_provider(group_id: int, data: ProviderGroupWrite, session: Session = 
     session.commit()
     session.refresh(group)
     touch_db(session)
+    reload_pool(session)
     return _load_group_read(group, session)
 
 
@@ -168,6 +171,7 @@ def delete_provider(group_id: int, session: Session = Depends(get_session)):
     session.delete(group)
     session.commit()
     touch_db(session)
+    reload_pool(session)
     return {"ok": True}
 
 
@@ -182,6 +186,7 @@ def add_model(group_id: int, data: ModelEntryWrite, session: Session = Depends(g
     session.commit()
     session.refresh(entry)
     touch_db(session)
+    reload_pool(session)
     return ModelEntryRead.model_validate(entry)
 
 
@@ -197,6 +202,7 @@ def update_model(group_id: int, model_id: int, data: ModelEntryWrite,
     session.commit()
     session.refresh(entry)
     touch_db(session)
+    reload_pool(session)
     return ModelEntryRead.model_validate(entry)
 
 
@@ -208,6 +214,7 @@ def delete_model(group_id: int, model_id: int, session: Session = Depends(get_se
     session.delete(entry)
     session.commit()
     touch_db(session)
+    reload_pool(session)
     return {"ok": True}
 
 
@@ -227,6 +234,7 @@ def reorder_groups(body: ReorderBody, session: Session = Depends(get_session)):
             session.add(group)
     session.commit()
     touch_db(session)
+    reload_pool(session)
     return list_providers(session)
 
 
@@ -242,6 +250,7 @@ def reorder_models(group_id: int, body: ReorderBody, session: Session = Depends(
             session.add(entry)
     session.commit()
     touch_db(session)
+    reload_pool(session)
     models = session.exec(
         select(ModelEntry)
         .where(ModelEntry.group_id == group_id)

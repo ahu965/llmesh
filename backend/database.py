@@ -121,7 +121,7 @@ def _migrate_db():
 
 def init_db():
     """初始化数据库表结构（首次运行时调用）"""
-    from backend.models.config import GlobalSettings, ProviderGroup, ModelEntry, TaskGroup  # noqa: F401
+    from backend.models.config import GlobalSettings, ProviderGroup, ModelEntry, TaskGroup, PlaygroundHistory  # noqa: F401
     SQLModel.metadata.create_all(engine)
     _migrate_db()
     # 确保 GlobalSettings 有默认行
@@ -137,3 +137,8 @@ def get_session():
     """FastAPI 依赖注入用"""
     with Session(engine) as session:
         yield session
+
+
+def get_session_direct() -> Session:
+    """非依赖注入场景（如 startup 事件）直接获取 Session，调用方负责 with 块管理"""
+    return Session(engine)

@@ -23,9 +23,14 @@ RATE_LIMIT_COOLDOWN: int   = GLOBAL_SETTINGS["rate_limit_cooldown"]
 
 
 # ====================== 构建运行时模型池 ======================
-def _build_model_pool() -> List[Dict]:
+def _build_model_pool(pool_raw: Optional[List[Dict]] = None) -> List[Dict]:
+    """
+    构建运行时模型池。
+    pool_raw: 指定原始数据时使用该数据（热重载场景）；不传则使用模块级 MODEL_POOL_RAW（初始化场景）。
+    """
+    source = pool_raw if pool_raw is not None else MODEL_POOL_RAW
     valid = []
-    for group in MODEL_POOL_RAW:
+    for group in source:
         if not all(group.get(k) for k in ["vendor", "api_key", "base_url", "models"]):
             logger.warning(f"忽略配置不完整的厂商分组：{group.get('vendor', '未知厂商')}")
             continue

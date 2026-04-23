@@ -4,6 +4,7 @@ from sqlmodel import Session, select
 from backend.database import get_session
 from backend.models.config import GlobalSettings
 from backend.core.db_utils import touch_db
+from backend.core.pool_sync import reload_pool
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -28,5 +29,6 @@ def update_settings(data: GlobalSettings, session: Session = Depends(get_session
     session.commit()
     session.refresh(gs)
     touch_db(session)
+    reload_pool(session)
     session.refresh(gs)
     return gs

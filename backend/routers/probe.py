@@ -44,32 +44,25 @@ def probe_model(body: ProbeRequest, session: Session = Depends(get_session)):
     if not entry.enabled or not group.enabled:
         return ProbeResponse(ok=False, error="模型或厂商组已禁用，跳过探测")
 
-    # 动态引入，避免循环依赖
     try:
-        from langchain_openai import ChatOpenAI
         from langchain_core.messages import HumanMessage
+        from backend.utils.llm_invoke import build_chat_llm
+        from backend.models.config import GlobalSettings
+        from sqlmodel import select as sql_select
+        gs = session.exec(sql_select(GlobalSettings)).first() or GlobalSettings()
     except ImportError as e:
         raise HTTPException(status_code=500, detail=f"缺少依赖：{e}")
 
-    extra_body = entry.get_extra_body() or {}
-    # 思考模型探测时关闭 thinking，避免超时
-    if entry.supports_thinking and "enable_thinking" not in extra_body:
-        extra_body["enable_thinking"] = False
-
     try:
-        kwargs: dict = dict(
-            model=entry.model,
-            api_key=group.api_key,
-            base_url=group.base_url,
-            temperature=0.1,
+        # 探测时固定关闭 thinking（避免超时）、限制 max_tokens、固定超时
+        llm = build_chat_llm(
+            group, entry, gs,
+            thinking=False,
+            streaming=True,
             max_tokens=64,
             timeout=PROBE_TIMEOUT,
-            max_retries=0,
-            streaming=True,  # 兼容仅支持流式的模型
+            temperature=0.1,
         )
-        if extra_body:
-            kwargs["extra_body"] = extra_body
-        llm = ChatOpenAI(**kwargs)
         t0 = time.time()
         chunks = []
         for chunk in llm.stream([HumanMessage(content=PROBE_MESSAGE)]):

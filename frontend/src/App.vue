@@ -25,6 +25,14 @@
           <template #icon><icon-experiment /></template>
           路由模拟器
         </a-menu-item>
+        <a-menu-item key="/playground">
+          <template #icon><icon-thunderbolt /></template>
+          Playground
+        </a-menu-item>
+        <a-menu-item key="/prompt-optimizer">
+          <template #icon><icon-edit /></template>
+          提示词优化
+        </a-menu-item>
         <a-menu-item key="/settings">
           <template #icon><icon-settings /></template>
           全局配置
@@ -45,7 +53,7 @@
 
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
-import { IconApps, IconSettings, IconExperiment, IconStorage } from '@arco-design/web-vue/es/icon'
+import { IconApps, IconSettings, IconExperiment, IconStorage, IconThunderbolt, IconEdit } from '@arco-design/web-vue/es/icon'
 
 const route = useRoute()
 const router = useRouter()

@@ -247,3 +247,226 @@ export const apiApplySuggest = (modelId: number) =>
 
 export const apiBatchSuggest = (modelIds: number[] = [], forceRefresh = false) =>
   http.post('/api/ai/suggest-model/batch', { model_ids: modelIds, force_refresh: forceRefresh }, { timeout: 300000 })
+
+// ---------- Playground ----------
+export interface PlaygroundModelRef {
+  group_id: number
+  model_id: number
+}
+
+export interface AvailableModel {
+  group_id: number
+  model_id: number
+  vendor: string
+  model: string
+  alias: string | null
+  thinking_mode: string            // "none" | "optional" | "always"
+  tags: string[]
+  remark: string | null
+}
+
+export interface ToolCall {
+  id: string | null
+  name: string
+  arguments: Record<string, any>
+}
+
+export interface ModelResult {
+  group_id: number
+  model_id: number
+  vendor: string
+  model: string
+  ok: boolean
+  reply: string | null
+  latency_ms: number
+  error: string | null
+  thinking_used: boolean
+  tokens_input: number | null
+  tokens_output: number | null
+  self_identity: string | null       // 模型自报身份（如 "Qwen3-235B，知识截止到 2025-04"）
+  tool_calls: ToolCall[] | null       // 模型发起的工具调用列表
+}
+
+export interface JudgeResult {
+  judge_vendor: string
+  judge_model: string
+  ranking: string[]
+  scores: Record<string, number>
+  comment: string
+}
+
+export interface PlaygroundRequest {
+  prompt: string
+  models: PlaygroundModelRef[]
+  thinking?: boolean | null
+  temperature?: number | null
+  judge: boolean
+  tools?: Record<string, any>[] | null   // OpenAI 格式的工具定义列表
+  system_prompt?: string | null          // 自定义 system prompt
+}
+
+export interface PlaygroundResponse {
+  prompt: string
+  results: ModelResult[]
+  judge: JudgeResult | null
+  total_time_ms: number
+}
+
+export const apiPlaygroundModels = () =>
+  http.get<AvailableModel[]>('/api/playground/models')
+
+export const apiPlaygroundRun = (body: PlaygroundRequest) =>
+  http.post<PlaygroundResponse>('/api/playground/run', body, { timeout: 300000 })
+
+// ---------- Playground History ----------
+export interface PlaygroundHistorySummary {
+  id: number
+  created_at: string
+  prompt: string
+  tool_mode: boolean
+  total_time_ms: number
+  model_count: number
+}
+
+export interface PlaygroundHistoryDetail extends PlaygroundHistorySummary {
+  thinking: boolean | null
+  temperature: number | null
+  tools_json: string | null
+  results: ModelResult[]
+  judge: JudgeResult | null
+  remark: string | null
+}
+
+export const apiPlaygroundHistory = (page = 1, pageSize = 20) =>
+  http.get<{ records: PlaygroundHistorySummary[]; total: number }>('/api/playground/history', { params: { page, page_size: pageSize } })
+
+export const apiPlaygroundHistoryDetail = (id: number) =>
+  http.get<PlaygroundHistoryDetail>(`/api/playground/history/${id}`)
+
+export const apiPlaygroundHistoryDelete = (id: number) =>
+  http.delete(`/api/playground/history/${id}`)
+
+// ---------- Prompt Optimizer ----------
+export interface OptimizeRequest {
+  raw_prompt: string
+  strategy: string
+  context?: string | null
+  output_format?: string | null
+  model_ref?: { group_id: number; model_id: number } | null
+}
+
+export interface OptimizeResponse {
+  raw_prompt: string
+  optimized_prompt: string
+  strategy_used: string
+  tips: string[]
+  model_vendor: string
+  model_name: string
+  latency_ms: number
+  tokens_input?: number | null
+  tokens_output?: number | null
+}
+
+export interface StrategyItem {
+  key: string
+  name: string
+  description: string
+}
+
+export interface StrategyGroup {
+  group: string
+  label: string
+  items: StrategyItem[]
+}
+
+export interface RecommendRequest {
+  raw_prompt: string
+}
+
+export interface RecommendResponse {
+  recommended_keys: string[]
+  reason: string
+}
+
+export const apiOptimizeStrategies = () =>
+  http.get<StrategyGroup[]>('/api/prompt-optimizer/strategies')
+
+export const apiRecommendStrategy = (body: RecommendRequest) =>
+  http.post<RecommendResponse>('/api/prompt-optimizer/recommend', body, { timeout: 15000 })
+
+export const apiOptimizePrompt = (body: OptimizeRequest) =>
+  http.post<OptimizeResponse>('/api/prompt-optimizer/optimize', body, { timeout: 60000 })
+
+export const apiOptimizerModels = () =>
+  http.get<AvailableModel[]>('/api/prompt-optimizer/models')
+
+// ---------- Prompt Optimizer: Compare Test ----------
+export interface CompareTestRequest {
+  raw_prompt: string
+  optimized_prompt: string
+  test_model: { group_id: number; model_id: number }
+}
+
+export interface CompareTestSingleResult {
+  prompt_type: string
+  reply: string
+  latency_ms: number
+  ok: boolean
+  error: string | null
+}
+
+export interface CompareTestResponse {
+  raw_prompt: string
+  optimized_prompt: string
+  test_model_vendor: string
+  test_model_name: string
+  raw_result: CompareTestSingleResult
+  optimized_result: CompareTestSingleResult
+}
+
+export const apiCompareTest = (body: CompareTestRequest) =>
+  http.post<CompareTestResponse>('/api/prompt-optimizer/compare-test', body, { timeout: 120000 })
+
+// ---------- Prompt Optimizer: Ask ----------
+export interface AskRequest {
+  optimized_prompt: string
+  test_model: { group_id: number; model_id: number }
+}
+
+export interface AskResponse {
+  optimized_prompt: string
+  test_model_vendor: string
+  test_model_name: string
+  reply: string
+  latency_ms: number
+  ok: boolean
+  error: string | null
+}
+
+export const apiAskWithOptimized = (body: AskRequest) =>
+  http.post<AskResponse>('/api/prompt-optimizer/ask', body, { timeout: 120000 })
+
+// ---------- Prompt Optimizer: Multi Model Compare ----------
+export interface MultiModelCompareRequest {
+  optimized_prompt: string
+  test_models: { group_id: number; model_id: number }[]
+}
+
+export interface MultiModelCompareItem {
+  group_id: number
+  model_id: number
+  vendor: string
+  model_name: string
+  reply: string
+  latency_ms: number
+  ok: boolean
+  error: string | null
+}
+
+export interface MultiModelCompareResponse {
+  optimized_prompt: string
+  results: MultiModelCompareItem[]
+}
+
+export const apiMultiModelCompare = (body: MultiModelCompareRequest) =>
+  http.post<MultiModelCompareResponse>('/api/prompt-optimizer/multi-model-compare', body, { timeout: 180000 })

@@ -12,6 +12,7 @@ from sqlmodel import Session, select
 
 from backend.database import get_session
 from backend.models.config import TaskGroup, GlobalSettings
+from backend.core.pool_sync import reload_pool
 
 router = APIRouter(prefix="/api/task-groups", tags=["task_groups"])
 
@@ -128,6 +129,7 @@ def create_task_group(data: TaskGroupWrite, session: Session = Depends(get_sessi
     _touch_db(session)
     session.commit()
     session.refresh(tg)
+    reload_pool(session)
     return _to_read(tg)
 
 
@@ -147,6 +149,7 @@ def update_task_group(tg_id: int, data: TaskGroupWrite, session: Session = Depen
     _touch_db(session)
     session.commit()
     session.refresh(tg)
+    reload_pool(session)
     return _to_read(tg)
 
 
@@ -158,4 +161,5 @@ def delete_task_group(tg_id: int, session: Session = Depends(get_session)):
     session.delete(tg)
     _touch_db(session)
     session.commit()
+    reload_pool(session)
     return {"ok": True}

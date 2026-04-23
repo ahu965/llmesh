@@ -114,6 +114,60 @@ def _build_model_entry(entry: ModelEntry, group: ProviderGroup) -> dict | str:
     return d
 
 
+def build_pool_raw(session: Session) -> list:
+    """
+    从数据库构建与 secrets.py MODEL_POOL_RAW 等价的列表。
+    供热重载（pool.reload）直接使用，无需经过 secrets.py 文件。
+    """
+    groups = session.exec(
+        select(ProviderGroup).where(ProviderGroup.enabled == True)  # noqa: E712
+    ).all()
+    pool_raw = []
+    for group in groups:
+        entries = session.exec(
+            select(ModelEntry)
+            .where(ModelEntry.group_id == group.id)
+            .where(ModelEntry.enabled == True)  # noqa: E712
+        ).all()
+        if not entries:
+            continue
+        models_list = [_build_model_entry(e, group) for e in entries]
+        g: dict = {
+            "vendor":   group.vendor,
+            "api_key":  group.api_key,
+            "base_url": group.base_url,
+            "models":   models_list,
+        }
+        if group.weight != 1:
+            g["weight"] = group.weight
+        if group.priority != 0:
+            g["priority"] = group.priority
+        if group.timeout != 60:
+            g["timeout"] = group.timeout
+        pool_raw.append(g)
+    return pool_raw
+
+
+def build_global_settings(session: Session) -> dict:
+    """
+    从数据库构建与 secrets.py GLOBAL_SETTINGS 等价的字典。
+    """
+    gs = session.exec(select(GlobalSettings)).first() or GlobalSettings()
+    d = {
+        "temperature":        gs.temperature,
+        "max_tokens":         gs.max_tokens,
+        "max_retries":        gs.max_retries,
+        "fault_duration":     gs.fault_duration,
+        "default_timeout":    gs.default_timeout,
+        "timeout_retries":    gs.timeout_retries,
+        "timeout_step":       gs.timeout_step,
+        "rate_limit_cooldown": gs.rate_limit_cooldown,
+    }
+    if gs.default_thinking_timeout is not None:
+        d["default_thinking_timeout"] = gs.default_thinking_timeout
+    return d
+
+
 def export_secrets(session: Session, output_path: Optional[str | Path] = None) -> str:
     """
     从数据库生成 secrets.py 内容，并可选写入文件。

@@ -4,7 +4,8 @@
 长期：网关模式，可无缝切换 PostgreSQL
 """
 from typing import Optional, Dict, Any, List
-from sqlmodel import SQLModel, Field, JSON, Column
+from datetime import datetime
+from sqlmodel import SQLModel, Field
 import json
 
 
@@ -81,7 +82,10 @@ class ModelEntry(SQLModel, table=True):
 
     def get_extra_body(self) -> Optional[Dict[str, Any]]:
         if self.extra_body:
-            return json.loads(self.extra_body)
+            try:
+                return json.loads(self.extra_body)
+            except json.JSONDecodeError:
+                return None
         return None
 
     def set_extra_body(self, data: Optional[Dict[str, Any]]):
@@ -141,3 +145,21 @@ class TaskGroup(SQLModel, table=True):
         if self.thinking is None:
             return None
         return bool(self.thinking)
+
+
+class PlaygroundHistory(SQLModel, table=True):
+    """
+    Playground 评测历史记录
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    prompt: str = Field(default="", description="评测用的 prompt（不限长度）")
+    thinking: Optional[bool] = Field(default=None, description="是否开启思考模式")
+    temperature: Optional[float] = Field(default=None, description="温度参数")
+    tool_mode: bool = Field(default=False, description="是否为 tool calling 评测")
+    tools_json: Optional[str] = Field(default=None, description="工具定义 JSON 字符串")
+    results_json: str = Field(default="[]", description="所有模型结果的 JSON 字符串")
+    judge_json: Optional[str] = Field(default=None, description="评委评分结果 JSON 字符串")
+    total_time_ms: int = Field(default=0, description="总耗时（毫秒）")
+    remark: Optional[str] = Field(default=None, description="备注（供用户标记用途）")
+    model_count: int = Field(default=0, description="参与评测的模型数量")

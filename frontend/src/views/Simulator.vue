@@ -64,15 +64,20 @@
           </a-form-item>
 
           <a-form-item label="exclude_tags">
-            <a-select
-              v-model="form.exclude_tags"
-              multiple
-              allow-create
-              allow-clear
-              placeholder="选择或输入排除 tag"
-              style="width:220px"
-              :options="meta.tags.map(t => ({ label: t, value: t }))"
-            />
+            <a-space direction="vertical" :size="4">
+              <a-select
+                v-model="form.exclude_tags"
+                multiple
+                allow-create
+                allow-clear
+                placeholder="选择或输入排除 tag"
+                style="width:220px"
+                :options="meta.tags.map(t => ({ label: t, value: t }))"
+              />
+              <a-checkbox v-model="form.no_default_exclude">
+                <span style="font-size:12px;color:var(--color-text-3)">忽略默认排除（math / long-context / long / translate）</span>
+              </a-checkbox>
+            </a-space>
           </a-form-item>
 
           <a-form-item>
@@ -258,11 +263,12 @@ const form = ref({
   vision: null as boolean | null,
   tags: [] as string[],
   exclude_tags: [] as string[],
+  no_default_exclude: false,
   task_group: null as string | null,
 })
 
 function reset() {
-  form.value = { prefer: [], thinking: null, vision: null, tags: [], exclude_tags: [], task_group: null }
+  form.value = { prefer: [], thinking: null, vision: null, tags: [], exclude_tags: [], no_default_exclude: false, task_group: null }
   result.value = null
 }
 
@@ -276,7 +282,9 @@ async function run() {
       thinking: toTriBool(form.value.thinking),
       vision: toTriBool(form.value.vision),
       tags: form.value.tags.length ? form.value.tags.join(',') : null,
-      exclude_tags: form.value.exclude_tags.length ? form.value.exclude_tags.join(',') : null,
+      exclude_tags: form.value.exclude_tags.length
+        ? form.value.exclude_tags.join(',')
+        : form.value.no_default_exclude ? '' : null,
       task_group: form.value.task_group || null,
     })
     result.value = res.data
@@ -299,6 +307,7 @@ const codeHint = computed(() => {
   if (form.value.vision !== null) parts.push(`vision=${form.value.vision}`)
   if (form.value.tags.length) parts.push(`tags="${form.value.tags.join(',')}"`)
   if (form.value.exclude_tags.length) parts.push(`exclude_tags="${form.value.exclude_tags.join(',')}"`)
+  else if (form.value.no_default_exclude) parts.push(`exclude_tags=[]`)
   return `get_llm(${parts.join(', ')})`
 })
 

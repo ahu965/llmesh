@@ -160,6 +160,37 @@ class MultiVendorLLMPool:
             if field == "success" and latency:
                 stats.total_latency += latency
 
+    def reload(self, pool_raw: List[Dict], global_settings: Optional[Dict] = None):
+        """
+        用新的配置数据热重载模型池，无需重启进程。
+
+        pool_raw:        与 secrets.py 中 MODEL_POOL_RAW 等价的列表（已由调用方从数据库构建）。
+        global_settings: 可选，与 secrets.py 中 GLOBAL_SETTINGS 等价的字典；
+                         不传则只更新模型池，保留当前全局参数。
+
+        线程安全：用 _lock 保护，正在进行中的请求不受影响（持有旧引用直到本次调用结束）。
+        reload 后：熔断状态、统计数据、LLM 实例缓存全部清空，以新配置为准。
+        """
+        from llmesh.config import _build_model_pool
+        new_pool = _build_model_pool(pool_raw)
+
+        with self._lock:
+            self._model_pool = new_pool
+            if global_settings:
+                self._default_temperature = global_settings.get("temperature", self._default_temperature)
+                self._default_max_tokens  = global_settings.get("max_tokens",  self._default_max_tokens)
+                self._default_max_retries = global_settings.get("max_retries", self._default_max_retries)
+                self._fault_duration      = global_settings.get("fault_duration", self._fault_duration)
+                self._timeout_retries     = global_settings.get("timeout_retries", self._timeout_retries)
+                self._timeout_step        = global_settings.get("timeout_step", self._timeout_step)
+                self._rate_limit_cooldown = global_settings.get("rate_limit_cooldown", self._rate_limit_cooldown)
+            # 清空运行时状态，以新配置为准
+            self._circuit.clear()
+            self._stats.clear()
+            self._llm_cache.clear()
+            self._rate_limit_penalty.clear()
+        logger.info(f"[pool.reload] 模型池已热重载，共 {len(new_pool)} 个模型条目")
+
     def get_stats_report(self) -> Dict:
         with self._lock:
             return {
@@ -224,6 +255,12 @@ class MultiVendorLLMPool:
             return True
         msg = str(e).lower()
         return "429" in msg or "rate limit" in msg or "too many requests" in msg
+
+    @staticmethod
+    def _is_protocol_incompatible(e: Exception) -> bool:
+        """协议不兼容错误（如模型不支持 SystemMessage），属于配置问题而非运行时故障"""
+        msg = str(e).lower()
+        return "role must be in" in msg or "invalid role" in msg or "unsupported role" in msg
 
     # ==================== 模型选择 ====================
 
@@ -529,7 +566,10 @@ class MultiVendorLLMPool:
                         self._open_circuit(model_key)
                         skip_keys.add(model_key)
                         pinned_exhausted.add(model_key)
-                        logger.error(f"❌ [pinned:{vendor_model}] 故障：{e}\n{traceback.format_exc()}")
+                        if self._is_protocol_incompatible(e):
+                            logger.warning(f"⚠️ [pinned:{vendor_model}] 协议不兼容（不支持当前消息格式），跳过：{e}")
+                        else:
+                            logger.error(f"❌ [pinned:{vendor_model}] 故障：{e}\n{traceback.format_exc()}")
                         break
 
             logger.warning(f"[pinned] 固定候选列表全部失败，fallback 全量池（已尝试：{pinned_exhausted}）")
@@ -610,7 +650,10 @@ class MultiVendorLLMPool:
                     self._inc_stats(model_key, "failure")
                     self._open_circuit(model_key)
                     skip_keys.add(model_key)
-                    logger.error(f"❌ [{vendor_model}] 故障：{e}\n{traceback.format_exc()}")
+                    if self._is_protocol_incompatible(e):
+                        logger.warning(f"⚠️ [{vendor_model}] 协议不兼容（不支持当前消息格式），跳过：{e}")
+                    else:
+                        logger.error(f"❌ [{vendor_model}] 故障：{e}\n{traceback.format_exc()}")
                     break
 
         raise RuntimeError(f"所有模型均不可用（已尝试：{skip_keys}）")
@@ -712,13 +755,24 @@ class _PoolProxy:
 global_llm_pool = _PoolProxy()
 
 
+_DEFAULT_EXCLUDE_TAGS: tuple = ("math", "long-context", "long", "translation")
+"""
+默认排除标签：适用于绝大多数普通文本任务。
+- math：数学专用模型
+- long-context / long：超长上下文模型（成本高，短任务浪费）
+- translation：翻译专用模型（如 qwen-mt-flash，仅支持 user/assistant 角色，不接受 SystemMessage）
+
+如需使用这类模型，显式传 exclude_tags=[] 或传自定义列表即可覆盖默认值。
+"""
+
+
 def get_llm(
     temperature: Optional[float] = None,
     prefer: Union[str, List[str], None] = None,
     thinking: Optional[bool] = None,
     vision: Optional[bool] = None,
     tags: Union[str, List[str], None] = None,
-    exclude_tags: Union[str, List[str], None] = None,
+    exclude_tags: Union[str, List[str], None] = _DEFAULT_EXCLUDE_TAGS,
     exclude_models: Union[Set[str], None] = None,
     pinned: Union[List[str], None] = None,
     task_group: Optional[str] = None,
@@ -728,6 +782,8 @@ def get_llm(
 
     配置来源：secrets.py（通过 LLMESH_SECRETS_PATH 指定，或放在项目根目录）
 
+    exclude_tags: 默认排除 math / long-context / long 等特殊用途标签。
+                  特殊场景（如需要超长上下文）显式传 exclude_tags=[] 覆盖。
     task_group: 任务组名称，自动从 secrets.py 中的 TASK_GROUPS 展开为
                 pinned/exclude_tags/tags/thinking 组合，显式参数优先。
     """
